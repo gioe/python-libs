@@ -1,0 +1,28 @@
+# Default observability configuration
+# Values can use ${ENV_VAR} syntax for environment variable substitution
+
+sentry:
+  enabled: true
+  dsn: ${SENTRY_DSN}
+  environment: ${ENV:development}
+  release: ${RELEASE:unknown}
+  traces_sample_rate: 0.1
+  profiles_sample_rate: 0.0
+  send_default_pii: false
+
+otel:
+  enabled: true
+  service_name: ${SERVICE_NAME:aiq-service}
+  endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+  otlp_headers: ${OTEL_EXPORTER_OTLP_HEADERS}
+  metrics_enabled: true
+  traces_enabled: true
+  prometheus_enabled: true
+  insecure: false  # Set to true only for local development without TLS
+
+routing:
+  # Where to send each signal type
+  # Options: "sentry", "otel", "both"
+  errors: sentry    # Sentry has superior error grouping and alerting
+  metrics: otel     # OTEL/Prometheus for Grafana dashboards
+  traces: otel      # Can be "both" to send to Sentry Performance too

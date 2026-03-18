@@ -1,0 +1,121 @@
+#!/bin/bash
+# Cron wrapper script template
+#
+# Copy this file to your service's scripts/ directory, rename it (e.g. run_cron.sh),
+# and replace the placeholder variables below with values specific to your service.
+# See libs/templates/README.md for the full 5-step setup workflow.
+#
+# Usage (after configuring):
+#   Add to crontab:
+#   0 2 * * * /path/to/your-service/scripts/run_cron.sh >> /path/to/logs/cron.log 2>&1
+#
+# ---------------------------------------------------------------------------
+# PLACEHOLDER VARIABLES — replace before use
+# ---------------------------------------------------------------------------
+#
+#   SERVICE_NAME     Human-readable name shown in log banners (e.g. "My Service")
+#
+#   REQUIRED_ENV_VARS  Space-separated list of environment variable names that
+#                    must be non-empty before the script is allowed to run.
+#                    Example: "DATABASE_URL API_KEY SECRET_TOKEN"
+#
+#   SCRIPT_PATH      Path to the Python entry-point to execute, relative to the
+#                    service root directory.
+#                    Example: "run_generation.py"
+#
+#   PYTHON_ARGS      Command-line arguments passed verbatim to the Python script.
+#                    Example: "--count 50 --verbose"
+#
+# ---------------------------------------------------------------------------
+
+# ── Configure these four values ──────────────────────────────────────────────
+SERVICE_NAME="{{SERVICE_NAME}}"
+REQUIRED_ENV_VARS="{{REQUIRED_ENV_VARS}}"
+SCRIPT_PATH="{{SCRIPT_PATH}}"
+PYTHON_ARGS="{{PYTHON_ARGS}}"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Exit on error
+set -e
+
+# Determine script directory (works even if called via symlink)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVICE_DIR="$(dirname "$SCRIPT_DIR")"
+
+echo "================================================================"
+echo "$SERVICE_NAME - Cron Run"
+echo "Started: $(date)"
+echo "Service directory: $SERVICE_DIR"
+echo "================================================================"
+
+# Change to service directory
+cd "$SERVICE_DIR" || {
+    echo "ERROR: Failed to change to service directory: $SERVICE_DIR"
+    exit 1
+}
+
+# Activate virtual environment
+if [ -f "venv/bin/activate" ]; then
+    echo "Activating virtual environment..."
+    # shellcheck disable=SC1091
+    source venv/bin/activate
+else
+    echo "ERROR: Virtual environment not found at $SERVICE_DIR/venv"
+    exit 1
+fi
+
+# Load environment variables from .env file
+if [ -f ".env" ]; then
+    echo "Loading environment variables from .env..."
+    # Export variables from .env (skip comments and empty lines)
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+else
+    echo "WARNING: .env file not found, using existing environment variables"
+fi
+
+# Verify required environment variables
+for VAR in $REQUIRED_ENV_VARS; do
+    if [ -z "${!VAR}" ]; then
+        echo "ERROR: Required environment variable $VAR is not set"
+        exit 3
+    fi
+done
+
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
+# Run the configured script
+echo ""
+echo "Running $SERVICE_NAME..."
+echo "----------------------------------------------------------------"
+
+# shellcheck disable=SC2086
+python "$SCRIPT_PATH" $PYTHON_ARGS
+
+# Capture exit code
+EXIT_CODE=$?
+
+echo "----------------------------------------------------------------"
+echo "$SERVICE_NAME completed with exit code: $EXIT_CODE"
+echo "Finished: $(date)"
+echo "================================================================"
+
+# Optional: Send email notification on failure
+# Uncomment and configure if you want email alerts
+#
+# if [ $EXIT_CODE -ne 0 ]; then
+#     HOSTNAME=$(hostname)
+#     LOG_FILE="$SERVICE_DIR/logs/service.log"
+#
+#     echo "$SERVICE_NAME failed with exit code $EXIT_CODE on $HOSTNAME" | \
+#         mail -s "Alert: $SERVICE_NAME Failed" \
+#         -a "From: service@$HOSTNAME" \
+#         admin@example.com
+#
+#     echo "Failure notification sent to admin@example.com"
+# fi
+
+exit $EXIT_CODE

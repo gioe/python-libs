@@ -1,0 +1,4 @@
+# Optional dependency for run_loop() embedded scheduling.
+# Required only when calling CronJob.run_loop(); not needed for run_once().
+# run_once() is the recommended interface for Railway / cron / EventBridge deployments.
+schedule>=1.2.0
