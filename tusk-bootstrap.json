@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "project_type": "python_service",
+  "tasks": [
+    {
+      "summary": "Install gioe-libs into project dependencies",
+      "description": "Add gioe-libs to the project's requirements.txt (or pyproject.toml). Use the GitHub install form to pin to a specific ref:\n\n```\ngioe-libs @ git+https://github.com/gioe/python-libs.git@main\n```\n\nInstall into the local virtualenv and verify the import resolves:\n\n```bash\npip install -r requirements.txt\npython -c 'import gioe_libs; print(gioe_libs.__file__)'\n```\n\nIf your service needs the optional observability extras (OpenTelemetry + Sentry), add:\n\n```\ngioe-libs[observability] @ git+https://github.com/gioe/python-libs.git@main\n```",
+      "priority": "High",
+      "task_type": "chore",
+      "complexity": "XS",
+      "criteria": [
+        "gioe-libs appears in requirements.txt or pyproject.toml with a pinned GitHub ref",
+        "pip install succeeds with no dependency conflicts",
+        "import gioe_libs resolves without error in the project virtualenv"
+      ]
+    },
+    {
+      "summary": "Configure structured logging with gioe_libs.aiq_logging",
+      "description": "Replace ad-hoc logging setup with the structured logger from gioe_libs. Create a logging_config.py module in your service that wraps gioe_libs.aiq_logging.\n\nMinimal setup:\n\n```python\nfrom gioe_libs.aiq_logging import setup_logging, get_logger\n\n# Call once at service startup (e.g. in main.py or app factory)\nsetup_logging(service_name=\"my-service\", log_level=\"INFO\", json_output=True)\n\nlogger = get_logger(__name__)\n```\n\nFor FastAPI services, add the request-id middleware so each request gets a correlation ID in every log line:\n\n```python\nfrom gioe_libs.aiq_logging import request_id_context\n```\n\nJSON output should be enabled in production (log_level from env var LOG_LEVEL, defaulting to INFO).",
+      "priority": "High",
+      "task_type": "feature",
+      "complexity": "XS",
+      "criteria": [
+        "logging_config.py (or equivalent) calls setup_logging at service startup",
+        "All log output in production is valid JSON (each line is parseable)",
+        "LOG_LEVEL env var controls the log level; defaults to INFO",
+        "request_id propagates through async context (verify in logs for a multi-step request)"
+      ]
+    },
+    {
+      "summary": "Set up observability facade (OpenTelemetry + Sentry)",
+      "description": "Initialize the gioe_libs observability facade at service startup. The facade routes errors and metrics to Sentry and/or OpenTelemetry based on an observability.yaml config file.\n\nMinimal setup:\n\n```python\nfrom gioe_libs.observability import observability\n\n# In your app factory or main.py\nobservability.init(\n    config_path=\"config/observability.yaml\",\n    service_name=\"my-service\",\n    environment=os.getenv(\"ENVIRONMENT\", \"development\"),\n)\n```\n\nCreate config/observability.yaml — start from the example in libs/observability/config.py. Set SENTRY_DSN in .env and leave the Sentry block disabled in development.\n\nWrap critical sections:\n\n```python\nwith observability.start_span(\"process_item\") as span:\n    span.set_attribute(\"item_id\", item_id)\n    result = do_work(item)\n```\n\nInstall the observability extras: gioe-libs[observability].",
+      "priority": "Medium",
+      "task_type": "feature",
+      "complexity": "S",
+      "criteria": [
+        "observability.yaml exists under config/ with sentry and otel blocks",
+        "SENTRY_DSN env var is documented in .env.example; Sentry is disabled when not set",
+        "observability.init() is called at startup before any request handling",
+        "At least one span wraps a non-trivial code path",
+        "observability.capture_error() is called in the top-level exception handler"
+      ]
+    },
+    {
+      "summary": "Configure AlertManager for error and ops notifications",
+      "description": "Wire up gioe_libs.alerting.AlertManager to send Slack (or email) alerts on critical errors and ops events. AlertManager wraps your notification transport and adds rate-limiting, deduplication, and severity routing.\n\nMinimal setup:\n\n```python\nfrom gioe_libs.alerting.alerting import AlertManager, AlertingConfig, ErrorSeverity\n\nconfig = AlertingConfig(\n    slack_webhook_url=os.getenv(\"SLACK_ALERT_WEBHOOK\"),\n    min_severity=ErrorSeverity.ERROR,\n    rate_limit_seconds=300,\n)\nalert_manager = AlertManager(config)\n```\n\nFire an alert:\n\n```python\nalert_manager.send_error_alert(\n    error=exc,\n    context={\"job\": \"daily-report\", \"item_count\": n},\n)\n```\n\nDocument SLACK_ALERT_WEBHOOK in .env.example. The alert_manager instance should be shared (singleton or dependency-injected), not created per-request.",
+      "priority": "Medium",
+      "task_type": "feature",
+      "complexity": "S",
+      "criteria": [
+        "AlertManager is initialized once at startup with config from env vars",
+        "SLACK_ALERT_WEBHOOK is documented in .env.example; alerts silently no-op when not set",
+        "send_error_alert is called in the global error handler (or equivalent)",
+        "Rate limiting is configured (min 5-minute window between duplicate alerts)",
+        "A smoke test or manual verification confirms an alert fires to the configured destination"
+      ]
+    },
+    {
+      "summary": "Add cron job wrapper from templates/run_cron.sh.template",
+      "description": "Create a cron wrapper script for any scheduled work in this service using the canonical template from the gioe/python-libs repo.\n\nSteps:\n1. Copy templates/run_cron.sh.template from the gioe/python-libs repo to scripts/run_cron.sh in your service.\n2. Fill in the four placeholder variables at the top of the file:\n   - SERVICE_NAME — human-readable name shown in log banners\n   - REQUIRED_ENV_VARS — space-separated list of env vars that must be set\n   - SCRIPT_PATH — path to the Python entry point, relative to the service root\n   - PYTHON_ARGS — CLI arguments passed to the script\n3. Make it executable: chmod +x scripts/run_cron.sh\n4. Register it with your scheduler (crontab, Railway cron, AWS EventBridge, etc.).\n5. If using CronJob harness from gioe_libs.cron_runner, wire it in your entry-point Python script:\n\n```python\nfrom gioe_libs.cron_runner import CronJob\njob = CronJob(\n    name=\"my-job\",\n    schedule=\"0 * * * *\",\n    work_fn=run_work,\n    observability=observability,\n    alert_manager=alert_manager,\n)\nexit_code = job.run_once()\nsys.exit(exit_code)\n```",
+      "priority": "Low",
+      "task_type": "chore",
+      "complexity": "XS",
+      "criteria": [
+        "scripts/run_cron.sh exists and is derived from templates/run_cron.sh.template",
+        "All four placeholder variables (SERVICE_NAME, REQUIRED_ENV_VARS, SCRIPT_PATH, PYTHON_ARGS) are filled in",
+        "Script is executable (chmod +x)",
+        "Cron schedule is documented in a comment at the top of the script and registered with the project scheduler",
+        "Script exits non-zero on failure and the exit code propagates to the scheduler"
+      ]
+    }
+  ]
+}
