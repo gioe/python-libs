@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gioe-libs-domain-types"
+version = "0.1.0"
+description = "Domain type definitions for AIQ services (optional extra for gioe-libs)"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages]
+find = {}

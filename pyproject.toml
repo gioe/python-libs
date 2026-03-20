@@ -19,13 +19,15 @@ observability = [
     "opentelemetry-exporter-otlp>=1.20.0",
     "opentelemetry-exporter-prometheus>=0.41b0",
 ]
+domain-types = [
+    "gioe-libs-domain-types @ git+https://github.com/gioe/python-libs.git#subdirectory=domain_types_pkg",
+]
 
 [tool.setuptools]
 packages = [
     "gioe_libs",
     "gioe_libs.alerting",
     "gioe_libs.cron_runner",
-    "gioe_libs.domain_types",
     "gioe_libs.aiq_logging",
     "gioe_libs.observability",
 ]

@@ -14,6 +14,12 @@ With optional observability dependencies:
 pip install "git+https://github.com/gioe/python-libs.git#egg=gioe-libs[observability]"
 ```
 
+With product-specific domain type definitions (AIQ enums):
+
+```bash
+pip install "git+https://github.com/gioe/python-libs.git#egg=gioe-libs[domain-types]"
+```
+
 ## Modules
 
 ### `gioe_libs.aiq_logging`
@@ -28,9 +34,10 @@ Alerting utilities for sending notifications (e.g., Slack).
 
 Cron job runner abstraction for scheduled tasks.
 
-### `gioe_libs.domain_types`
+### `gioe_libs.domain_types` *(optional extra)*
 
-Shared domain type definitions used across services.
+Product-specific domain type definitions for AIQ services (QuestionType, TestStatus, etc.).
+Not installed by default — install via `gioe-libs[domain-types]`.
 
 ### `gioe_libs.observability`
 
