@@ -163,7 +163,8 @@ class CronJob:
             error_message = str(exc)
             logger.error("Job '%s' failed: %s", self.name, exc, exc_info=True)
             self.observability.capture_error(exc, context={"job": self.name})
-            run_summary = {"error_message": error_message}
+            partial_summary = getattr(exc, "run_summary", {})
+            run_summary = {**partial_summary, "error_message": error_message}
         finally:
             duration = time.monotonic() - start_time
 
@@ -190,7 +191,7 @@ class CronJob:
                 status=heartbeat_status,
                 exit_code=exit_code,
                 error_message=run_summary.get("error_message"),
-                stats=run_summary if exit_code == 0 else None,
+                stats=run_summary,
             )
 
         return exit_code

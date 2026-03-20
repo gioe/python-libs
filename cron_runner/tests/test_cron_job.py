@@ -186,7 +186,29 @@ def test_run_once_failure_path_heartbeat_failed(tmp_path: Path) -> None:
     assert data["status"] == "failed"
     assert data["exit_code"] == 1
     assert data["error_message"] == "something broke"
-    assert "stats" not in data
+    # stats are now included on failure (contains at least error_message)
+    assert "stats" in data
+
+
+def test_run_once_failure_path_heartbeat_includes_partial_stats(tmp_path: Path) -> None:
+    """Heartbeat stats include partial run_summary attached to the exception."""
+
+    def failing_fn():
+        err = RuntimeError("partial failure")
+        err.run_summary = {"questions_inserted": 3, "approval_rate": 75.0}  # type: ignore[attr-defined]
+        raise err
+
+    with patch("libs.cron_runner.cron_job.setup_logging"):
+        job = _make_job(tmp_path, work_fn=failing_fn)
+        job.run_once()
+
+    data = json.loads(Path(job.heartbeat_path).read_text())
+    assert data["status"] == "failed"
+    assert data["exit_code"] == 1
+    assert data["error_message"] == "partial failure"
+    assert data["stats"]["questions_inserted"] == 3
+    assert data["stats"]["approval_rate"] == 75.0
+    assert data["stats"]["error_message"] == "partial failure"
 
 
 def test_run_once_failure_path_capture_error_called(tmp_path: Path) -> None:
