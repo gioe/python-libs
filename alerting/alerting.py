@@ -839,6 +839,149 @@ class AlertManager:
         </html>
         """
 
+    def send_run_completion(
+        self,
+        exit_code: int,
+        run_summary: Optional[RunSummary] = None,
+    ) -> None:
+        """Send a run-completion notification via email and/or Discord.
+
+        Email is sent only when ``email_enabled=True``.  Discord is sent
+        whenever ``discord_webhook_url`` is configured.  Errors from either
+        channel are caught and logged at WARNING/ERROR level — they never
+        propagate to the caller or affect the job's exit code.
+
+        Args:
+            exit_code: Run exit code (0=success, 1=partial failure, 2+=failure)
+            run_summary: Optional generic run summary dict with standard keys:
+                generated (int), inserted (int), errors (int),
+                duration_seconds (float), details (dict of extra fields).
+        """
+        run_summary = run_summary or {}
+        errors = run_summary.get("errors", 0) or 0
+
+        if self.email_enabled:
+            try:
+                subject = (
+                    "\u2705 Question Generation: Success"
+                    if exit_code == 0
+                    else (
+                        "\u26a0\ufe0f Question Generation: Partial Failure"
+                        if exit_code == 1
+                        else f"\u274c Question Generation: Failed (exit {exit_code})"
+                    )
+                )
+                text_body = self._build_completion_text(errors, run_summary)
+                html_body = self._build_completion_html(errors, run_summary)
+
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"] = self.from_email or ""
+                msg["To"] = ", ".join(self.to_emails)
+                msg.attach(MIMEText(text_body, "plain"))
+                msg.attach(MIMEText(html_body, "html"))
+
+                if self.smtp_host is None:
+                    raise ValueError("SMTP host must be configured for email alerts")
+                if self.smtp_username is None:
+                    raise ValueError("SMTP username must be configured for email alerts")
+                if self.smtp_password is None:
+                    raise ValueError("SMTP password must be configured for email alerts")
+
+                with smtplib.SMTP(
+                    self.smtp_host, self.smtp_port, timeout=self.SMTP_TIMEOUT_SECONDS
+                ) as server:
+                    server.starttls()
+                    server.login(self.smtp_username, self.smtp_password)
+                    server.send_message(msg)
+
+                logger.info(f"Run completion email sent (exit_code={exit_code})")
+            except Exception as e:
+                logger.error(f"Failed to send run completion email: {e}")
+
+        if self.discord_webhook_url:
+            title, description, color, fields = self._format_run_summary_embed(
+                exit_code, run_summary
+            )
+            try:
+                self._send_discord_alert(title, description, color, fields)
+            except Exception:
+                logger.warning("Discord run-completion notification failed", exc_info=True)
+
+    def _format_run_summary_embed(
+        self,
+        exit_code: int,
+        run_summary: RunSummary,
+    ) -> tuple:
+        """Return (title, description, color, fields) for a run-completion Discord embed.
+
+        Args:
+            exit_code: Run exit code (0=success, 1=partial failure, 2+=failure)
+            run_summary: Generic run summary dict (standard keys + details)
+        """
+        if exit_code == 0:
+            title = "\u2705 Question Generation: Success"
+            color = self.DISCORD_COLOR_SUCCESS
+        elif exit_code == 1:
+            title = "\u26a0\ufe0f Question Generation: Partial Failure"
+            color = self.DISCORD_COLOR_WARNING
+        else:
+            title = f"\u274c Question Generation: Failed (exit {exit_code})"
+            color = self.DISCORD_COLOR_CRITICAL
+
+        details: Dict[str, Any] = run_summary.get("details", {})
+        generated = run_summary.get("generated")
+        inserted = run_summary.get("inserted")
+        duration_seconds = run_summary.get("duration_seconds")
+        questions_requested = details.get("questions_requested")
+        duplicates_found = details.get("duplicates_found")
+        approval_rate = details.get("approval_rate")
+        by_type: Dict[str, int] = details.get("by_type", {})
+        by_difficulty: Dict[str, int] = details.get("by_difficulty", {})
+
+        description = (
+            f"Run completed in {duration_seconds:.1f}s"
+            if duration_seconds is not None
+            else "Run completed"
+        )
+
+        fields: List[Dict[str, Any]] = []
+
+        if generated is not None:
+            if questions_requested:
+                pct = int(generated / questions_requested * 100)
+                fields.append(
+                    {"name": "Generated", "value": f"{generated} / {questions_requested} ({pct}%)", "inline": True}
+                )
+            else:
+                fields.append({"name": "Generated", "value": str(generated), "inline": True})
+
+        if inserted is not None:
+            fields.append({"name": "Inserted", "value": str(inserted), "inline": True})
+
+        if approval_rate is not None and generated is not None:
+            approved = round(generated * approval_rate / 100) if approval_rate else 0
+            fields.append(
+                {"name": "Approved", "value": f"{approved} / {generated} ({approval_rate:.1f}%)", "inline": True}
+            )
+        elif approval_rate is not None:
+            fields.append({"name": "Approval Rate", "value": f"{approval_rate:.1f}%", "inline": True})
+
+        if duplicates_found is not None:
+            fields.append({"name": "Duplicates", "value": f"{duplicates_found} found", "inline": True})
+
+        if by_type:
+            fields.append(
+                {"name": "By Type", "value": ", ".join(f"{k}: {v}" for k, v in sorted(by_type.items())), "inline": False}
+            )
+
+        if by_difficulty:
+            fields.append(
+                {"name": "By Difficulty", "value": " \u00b7 ".join(f"{k}: {v}" for k, v in sorted(by_difficulty.items())), "inline": False}
+            )
+
+        return title, description, color, fields
+
     def _build_alert_message(
         self,
         classified_error: "AlertableError",

@@ -8,3 +8,12 @@ build/
 *.egg
 .venv/
 venv/
+
+# tusk install files
+.claude/bin/
+.claude/skills/
+.claude/settings.json
+.claude/tusk-manifest.json
+tusk/tasks.db
+tusk/tasks.db-wal
+tusk/tasks.db-shm
