@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from libs.cron_runner.cron_job import CronJob
+from cron_runner.cron_job import CronJob
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ def _make_job(
 
 def test_run_once_happy_path_returns_zero(tmp_path: Path) -> None:
     """run_once() returns 0 when work_fn succeeds."""
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path)
         assert job.run_once() == 0
 
@@ -63,7 +63,7 @@ def test_run_once_heartbeat_started_then_completed(tmp_path: Path) -> None:
         started_statuses.append(data["status"])
         return original_work()
 
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         obs = MagicMock()
         job = CronJob(
             name="test-job",
@@ -85,7 +85,7 @@ def test_run_once_heartbeat_started_then_completed(tmp_path: Path) -> None:
 
 def test_run_once_happy_path_metrics_recorded(tmp_path: Path) -> None:
     """job.duration and job.exit_code metrics are recorded on success."""
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path)
         job.run_once()
 
@@ -104,29 +104,30 @@ def test_run_once_happy_path_metrics_recorded(tmp_path: Path) -> None:
 
 
 def test_run_once_happy_path_alert_sent(tmp_path: Path) -> None:
-    """alert_manager.send_run_completion() is called with exit_code=0 on success."""
+    """alert_manager.send_notification() is called on success."""
     alert_manager = MagicMock()
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, alert_manager=alert_manager)
         job.run_once()
 
-    alert_manager.send_run_completion.assert_called_once()
-    call_args = alert_manager.send_run_completion.call_args
-    assert call_args.args[0] == 0  # exit_code
+    alert_manager.send_notification.assert_called_once()
+    _, kwargs = alert_manager.send_notification.call_args
+    assert kwargs["severity"] == "info"
+    assert "Success" in kwargs["title"]
 
 
 def test_run_once_happy_path_no_alert_when_not_configured(tmp_path: Path) -> None:
     """No alert is sent when alert_manager is None."""
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, alert_manager=None)
         job.run_once()  # should not raise
 
 
 def test_run_once_captures_run_summary_in_alert(tmp_path: Path) -> None:
-    """run_summary returned by work_fn is passed to send_run_completion."""
+    """run_summary returned by work_fn is converted to fields for send_notification."""
     summary = {"generated": 42, "inserted": 40, "errors": 2}
     alert_manager = MagicMock()
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(
             tmp_path,
             work_fn=lambda: summary,
@@ -134,16 +135,17 @@ def test_run_once_captures_run_summary_in_alert(tmp_path: Path) -> None:
         )
         job.run_once()
 
-    sent_summary = alert_manager.send_run_completion.call_args.args[1]
-    assert sent_summary["generated"] == 42
-    assert sent_summary["inserted"] == 40
-    assert "duration_seconds" in sent_summary
+    _, kwargs = alert_manager.send_notification.call_args
+    field_labels = [label for label, _ in kwargs["fields"]]
+    assert "Generated" in field_labels
+    assert "Inserted" in field_labels
+    assert "Duration Seconds" in field_labels
 
 
 def test_run_once_heartbeat_stats_excludes_duration_seconds(tmp_path: Path) -> None:
     """Heartbeat stats must not include duration_seconds injected for alert_manager."""
     alert_manager = MagicMock()
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(
             tmp_path,
             work_fn=lambda: {"generated": 5},
@@ -167,7 +169,7 @@ def test_run_once_failure_path_returns_nonzero(tmp_path: Path) -> None:
     def failing_fn():
         raise RuntimeError("boom")
 
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, work_fn=failing_fn)
         assert job.run_once() == 1
 
@@ -178,7 +180,7 @@ def test_run_once_failure_path_heartbeat_failed(tmp_path: Path) -> None:
     def failing_fn():
         raise RuntimeError("something broke")
 
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, work_fn=failing_fn)
         job.run_once()
 
@@ -198,7 +200,7 @@ def test_run_once_failure_path_heartbeat_includes_partial_stats(tmp_path: Path) 
         err.run_summary = {"questions_inserted": 3, "approval_rate": 75.0}  # type: ignore[attr-defined]
         raise err
 
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, work_fn=failing_fn)
         job.run_once()
 
@@ -218,7 +220,7 @@ def test_run_once_failure_path_capture_error_called(tmp_path: Path) -> None:
     def failing_fn():
         raise exc
 
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, work_fn=failing_fn)
         job.run_once()
 
@@ -234,7 +236,7 @@ def test_run_once_failure_path_metrics_still_recorded(tmp_path: Path) -> None:
     def failing_fn():
         raise RuntimeError("oops")
 
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, work_fn=failing_fn)
         job.run_once()
 
@@ -246,22 +248,23 @@ def test_run_once_failure_path_metrics_still_recorded(tmp_path: Path) -> None:
 
 
 def test_run_once_failure_path_alert_sent_with_error(tmp_path: Path) -> None:
-    """Alert is sent with exit_code=1 when work_fn raises."""
+    """send_notification is called with severity='critical' when work_fn raises."""
 
     def failing_fn():
         raise RuntimeError("critical failure")
 
     alert_manager = MagicMock()
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, work_fn=failing_fn, alert_manager=alert_manager)
         job.run_once()
 
-    alert_manager.send_run_completion.assert_called_once()
-    exit_code = alert_manager.send_run_completion.call_args.args[0]
-    assert exit_code == 1
+    alert_manager.send_notification.assert_called_once()
+    _, kwargs = alert_manager.send_notification.call_args
+    assert kwargs["severity"] == "critical"
+    assert "Failed" in kwargs["title"]
 
-    sent_summary = alert_manager.send_run_completion.call_args.args[1]
-    assert sent_summary["error_message"] == "critical failure"
+    field_map = dict(kwargs["fields"])
+    assert field_map.get("Error Message") == "critical failure"
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +279,7 @@ def test_run_once_does_not_block(tmp_path: Path) -> None:
         return {}
 
     start = time.monotonic()
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, work_fn=fast_work)
         job.run_once()
 
@@ -349,7 +352,7 @@ def test_run_loop_schedules_and_runs(tmp_path: Path) -> None:
     mock_schedule_lib = MagicMock()
     mock_schedule_lib.Scheduler.return_value = mock_scheduler
 
-    with patch("libs.cron_runner.cron_job.setup_logging"):
+    with patch("cron_runner.cron_job.setup_logging"):
         with patch.dict("sys.modules", {"schedule": mock_schedule_lib}):
             with pytest.raises(StopIteration):
                 job.run_loop()
@@ -372,10 +375,10 @@ def test_no_service_imports() -> None:
     import sys
 
     # Reload the module to inspect its imports
-    if "libs.cron_runner.cron_job" in sys.modules:
-        del sys.modules["libs.cron_runner.cron_job"]
+    if "cron_runner.cron_job" in sys.modules:
+        del sys.modules["cron_runner.cron_job"]
 
-    import libs.cron_runner.cron_job as mod
+    import cron_runner.cron_job as mod
 
     source_file = mod.__file__
     assert source_file is not None

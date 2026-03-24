@@ -27,6 +27,15 @@ import yaml
 # Basic email format validation pattern (RFC 5322 simplified)
 _EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
+
+def _format_value(value: Any) -> str:
+    """Format a notification field value as a human-readable string."""
+    if isinstance(value, dict):
+        return ", ".join(f"{k}: {v}" for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
 logger = logging.getLogger(__name__)
 
 
@@ -119,20 +128,11 @@ class AlertError:
 
 
 # ---------------------------------------------------------------------------
-# RunSummary — generic run completion summary accepted by send_run_completion
+# RunSummary — generic dict returned by CronJob work functions
 # ---------------------------------------------------------------------------
 
-# RunSummary is a plain dict with standard keys.  All keys are optional so
-# callers can pass a partial dict and the email builder will show "N/A" for
-# missing fields.
-#
-# Standard keys:
-#   generated      - number of items generated
-#   inserted       - number of items inserted into the database
-#   errors         - number of errors / rejections
-#   duration_seconds - total run duration in seconds
-#   details        - dict of service-specific extra fields (e.g. by_type,
-#                    by_difficulty, approval_rate, error_message, etc.)
+# RunSummary is a plain dict.  Any keys may be present; CronJob converts
+# them to (label, value) tuples and passes them to send_notification().
 RunSummary = Dict[str, Any]
 
 
@@ -146,6 +146,8 @@ class AlertManager:
     SMTP_TIMEOUT_SECONDS = 30
 
     # Discord color codes (decimal)
+    DISCORD_COLOR_SUCCESS = 0x28A745   # Green
+    DISCORD_COLOR_WARNING = 0xFFC107   # Yellow
     DISCORD_COLOR_CRITICAL = 0xDC3545  # Red
 
     # Cooldown between Discord alerts for the same provider (seconds)
@@ -478,259 +480,164 @@ class AlertManager:
 
         return success
 
-    def send_run_completion(
+    def send_notification(
         self,
-        exit_code: int,
-        run_summary: Optional[RunSummary] = None,
+        title: str,
+        fields: List[Tuple[str, Any]],
+        severity: str = "info",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Send a run completion summary email after every generation run.
+        """Send a generic notification via email and Discord.
 
-        A no-op when email_enabled=False. SMTP errors are caught and logged
-        without raising, so they never affect the caller's exit code.
-
-        Args:
-            exit_code: Run exit code (0=success, 1=partial failure, 2+=failure)
-            run_summary: Optional generic run summary dict with standard keys:
-                generated (int), inserted (int), errors (int),
-                duration_seconds (float), details (dict of extra fields).
-                The details dict may contain service-specific keys like
-                approval_rate, by_type, by_difficulty, error_message, etc.
-        """
-        if not self.email_enabled:
-            return
-
-        run_summary = run_summary or {}
-
-        try:
-            subject = self._get_completion_subject(exit_code)
-            text_body = self._build_completion_text(exit_code, run_summary)
-            html_body = self._build_completion_html(exit_code, run_summary)
-
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = self.from_email or ""
-            msg["To"] = ", ".join(self.to_emails)
-            msg.attach(MIMEText(text_body, "plain"))
-            msg.attach(MIMEText(html_body, "html"))
-
-            if self.smtp_host is None:
-                raise ValueError("SMTP host must be configured for email alerts")
-            if self.smtp_username is None:
-                raise ValueError("SMTP username must be configured for email alerts")
-            if self.smtp_password is None:
-                raise ValueError("SMTP password must be configured for email alerts")
-
-            with smtplib.SMTP(
-                self.smtp_host, self.smtp_port, timeout=self.SMTP_TIMEOUT_SECONDS
-            ) as server:
-                server.starttls()
-                server.login(self.smtp_username, self.smtp_password)
-                server.send_message(msg)
-
-            logger.info(f"Run completion email sent (exit_code={exit_code})")
-        except Exception as e:
-            logger.error(f"Failed to send run completion email: {e}")
-
-    def _get_completion_subject(self, exit_code: int) -> str:
-        """Generate email subject for run completion notification."""
-        if exit_code == 0:
-            return "\u2705 AIQ Question Generation: Success"
-        elif exit_code == 1:
-            return "\u26a0\ufe0f AIQ Question Generation: Partial Failure"
-        else:
-            return f"\u274c AIQ Question Generation: Failed (exit {exit_code})"
-
-    def _build_completion_text(self, exit_code: int, run_summary: RunSummary) -> str:
-        """Build plain-text run completion email body.
+        SMTP and Discord errors are caught and logged; they never raise to the
+        caller.
 
         Args:
-            exit_code: Run exit code
-            run_summary: Generic run summary dict (standard keys + details)
+            title: Notification title (used as email subject and Discord embed title).
+            fields: List of (label, value) tuples rendered as the main content table.
+                Values may be strings, numbers, dicts, or lists — all are formatted
+                as human-readable strings automatically.
+            severity: Controls color styling. One of ``"info"`` (green),
+                ``"warning"`` (yellow), or ``"critical"`` (red).
+            metadata: Optional dict rendered as a secondary section at the end of
+                both the email body and the Discord embed.
         """
-        if exit_code == 0:
-            status = "Success"
-        elif exit_code == 1:
-            status = "Partial Failure"
-        else:
-            status = f"Failed (exit {exit_code})"
+        if self.email_enabled:
+            try:
+                text_body = self._build_notification_text(title, fields, severity, metadata)
+                html_body = self._build_notification_html(title, fields, severity, metadata)
 
-        details: Dict[str, Any] = run_summary.get("details", {})
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = title
+                msg["From"] = self.from_email or ""
+                msg["To"] = ", ".join(self.to_emails)
+                msg.attach(MIMEText(text_body, "plain"))
+                msg.attach(MIMEText(html_body, "html"))
 
-        generated = run_summary.get("generated", "N/A")
-        inserted = run_summary.get("inserted", "N/A")
-        errors = run_summary.get("errors", None)
-        duration_seconds = run_summary.get("duration_seconds", None)
+                if self.smtp_host is None:
+                    raise ValueError("SMTP host must be configured for email alerts")
+                if self.smtp_username is None:
+                    raise ValueError("SMTP username must be configured for email alerts")
+                if self.smtp_password is None:
+                    raise ValueError("SMTP password must be configured for email alerts")
 
-        # Extended fields from details
-        questions_requested = details.get("questions_requested", None)
-        questions_rejected = details.get("questions_rejected", errors)
-        duplicates_found = details.get("duplicates_found", None)
-        approval_rate = details.get("approval_rate", None)
-        by_type: Dict[str, int] = details.get("by_type", {})
-        by_difficulty: Dict[str, int] = details.get("by_difficulty", {})
-        error_message: Optional[str] = details.get("error_message")
+                with smtplib.SMTP(
+                    self.smtp_host, self.smtp_port, timeout=self.SMTP_TIMEOUT_SECONDS
+                ) as server:
+                    server.starttls()
+                    server.login(self.smtp_username, self.smtp_password)
+                    server.send_message(msg)
 
+                logger.info(f"Notification email sent: {title!r}")
+            except Exception as e:
+                logger.error(f"Failed to send notification email: {e}")
+
+        if self.discord_webhook_url:
+            color = {
+                "info": self.DISCORD_COLOR_SUCCESS,
+                "warning": self.DISCORD_COLOR_WARNING,
+                "critical": self.DISCORD_COLOR_CRITICAL,
+            }.get(severity.lower(), self.DISCORD_COLOR_SUCCESS)
+
+            discord_fields: List[Dict[str, Any]] = [
+                {"name": str(label), "value": _format_value(value), "inline": True}
+                for label, value in fields
+            ]
+            if metadata:
+                meta_lines = "\n".join(f"{k}: {v}" for k, v in metadata.items())
+                discord_fields.append(
+                    {"name": "Details", "value": meta_lines, "inline": False}
+                )
+
+            try:
+                self._send_discord_alert(
+                    title=title,
+                    description="",
+                    color=color,
+                    fields=discord_fields or None,
+                )
+            except Exception:
+                logger.warning("Discord notification failed", exc_info=True)
+
+    def _build_notification_text(
+        self,
+        title: str,
+        fields: List[Tuple[str, Any]],
+        severity: str,
+        metadata: Optional[Dict[str, Any]],
+    ) -> str:
+        """Build plain-text notification body."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         lines = [
-            f"AIQ Question Generation Run \u2014 {status}",
-            f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
-            f"Exit Code: {exit_code}",
+            title,
+            f"Time: {timestamp}",
+            f"Severity: {severity.upper()}",
             "",
-            "Run Statistics:",
-            f"  Questions Requested: {questions_requested if questions_requested is not None else 'N/A'}",
-            f"  Questions Generated: {generated}",
-            f"  Questions Rejected:  {questions_rejected if questions_rejected is not None else 'N/A'}",
-            f"  Duplicates Found:    {duplicates_found if duplicates_found is not None else 'N/A'}",
-            f"  Questions Inserted:  {inserted}",
-            f"  Approval Rate:       {f'{approval_rate:.1f}%' if approval_rate is not None else 'N/A'}",
-            f"  Duration:            {f'{duration_seconds:.1f}s' if duration_seconds is not None else 'N/A'}",
         ]
-
-        if by_type:
-            lines += ["", "By Type:"]
-            for qtype, count in sorted(by_type.items()):
-                lines.append(f"  {qtype:<20} {count}")
-
-        if by_difficulty:
-            lines += ["", "By Difficulty:"]
-            for diff, count in sorted(by_difficulty.items()):
-                lines.append(f"  {diff:<20} {count}")
-
-        if error_message:
-            lines += ["", f"Error: {error_message}"]
-
+        for label, value in fields:
+            lines.append(f"  {label}: {_format_value(value)}")
+        if metadata:
+            lines += ["", "Details:"]
+            for k, v in metadata.items():
+                lines.append(f"  {k}: {v}")
         return "\n".join(lines)
 
-    def _build_completion_html(self, exit_code: int, run_summary: RunSummary) -> str:
-        """Build HTML run completion email body.
+    def _build_notification_html(
+        self,
+        title: str,
+        fields: List[Tuple[str, Any]],
+        severity: str,
+        metadata: Optional[Dict[str, Any]],
+    ) -> str:
+        """Build HTML notification email body."""
+        color = {
+            "info": "#28a745",
+            "warning": "#ffc107",
+            "critical": "#dc3545",
+        }.get(severity.lower(), "#28a745")
 
-        Args:
-            exit_code: Run exit code
-            run_summary: Generic run summary dict (standard keys + details)
-        """
-        if exit_code == 0:
-            status = "Success"
-            color = "#28a745"
-        elif exit_code == 1:
-            status = "Partial Failure"
-            color = "#ffc107"
-        else:
-            status = f"Failed (exit {exit_code})"
-            color = "#dc3545"
-
-        details: Dict[str, Any] = run_summary.get("details", {})
-
-        generated = run_summary.get("generated", "N/A")
-        inserted = run_summary.get("inserted", "N/A")
-        errors = run_summary.get("errors", None)
-        duration_seconds = run_summary.get("duration_seconds", None)
-
-        # Extended fields from details
-        questions_requested = details.get("questions_requested", None)
-        questions_rejected = details.get("questions_rejected", errors)
-        duplicates_found = details.get("duplicates_found", None)
-        approval_rate = details.get("approval_rate", None)
-        by_type: Dict[str, int] = details.get("by_type", {})
-        by_difficulty: Dict[str, int] = details.get("by_difficulty", {})
-        error_message: Optional[str] = details.get("error_message")
-
-        approval_str = f"{approval_rate:.1f}%" if approval_rate is not None else "N/A"
-        duration_str = (
-            f"{duration_seconds:.1f}s" if duration_seconds is not None else "N/A"
-        )
-        requested_str = (
-            str(questions_requested) if questions_requested is not None else "N/A"
-        )
-        rejected_str = (
-            str(questions_rejected) if questions_rejected is not None else "N/A"
-        )
-        duplicates_str = (
-            str(duplicates_found) if duplicates_found is not None else "N/A"
-        )
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
-        def _display_name(s: str) -> str:
-            return s.replace("_", " ").title()
-
-        by_type_rows = "".join(
-            f"<tr><td>{html_module.escape(_display_name(qtype))}</td><td>{count}</td></tr>"
-            for qtype, count in sorted(by_type.items())
-        )
-        by_difficulty_rows = "".join(
-            f"<tr><td>{html_module.escape(_display_name(diff))}</td><td>{count}</td></tr>"
-            for diff, count in sorted(by_difficulty.items())
-        )
-        by_type_table = (
-            f"""
-            <h3>By Type</h3>
-            <table>
-                <tr><th>Type</th><th>Inserted</th></tr>
-                {by_type_rows}
-            </table>"""
-            if by_type
-            else ""
-        )
-        by_difficulty_table = (
-            f"""
-            <h3>By Difficulty</h3>
-            <table>
-                <tr><th>Difficulty</th><th>Generated</th></tr>
-                {by_difficulty_rows}
-            </table>"""
-            if by_difficulty
-            else ""
-        )
-        error_section = (
-            f"""
-            <div class="error-box">
-                <strong>Error</strong>
-                <p>{html_module.escape(error_message)}</p>
-            </div>"""
-            if error_message
-            else ""
+        rows = "".join(
+            f"<tr><td>{html_module.escape(str(label))}</td>"
+            f"<td>{html_module.escape(_format_value(value))}</td></tr>"
+            for label, value in fields
         )
 
-        html = f"""
+        metadata_section = ""
+        if metadata:
+            meta_rows = "".join(
+                f"<tr><td>{html_module.escape(str(k))}</td>"
+                f"<td>{html_module.escape(str(v))}</td></tr>"
+                for k, v in metadata.items()
+            )
+            metadata_section = f"""
+            <h3>Details</h3>
+            <table>
+                <tr><th>Key</th><th>Value</th></tr>
+                {meta_rows}
+            </table>"""
+
+        return f"""
         <html>
         <head>
             <style>
-                body {{
-                    font-family: Arial, sans-serif;
-                    line-height: 1.6;
-                    color: #333;
-                }}
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
                 .status-box {{
                     border-left: 4px solid {color};
                     padding: 15px;
                     background-color: #f8f9fa;
                     margin: 20px 0;
                 }}
-                .status {{
-                    color: {color};
-                    font-weight: bold;
-                    font-size: 18px;
-                }}
-                .error-box {{
-                    border-left: 4px solid #dc3545;
-                    padding: 15px;
-                    background-color: #fff5f5;
-                    margin: 20px 0;
-                    color: #dc3545;
-                }}
+                .title {{ color: {color}; font-weight: bold; font-size: 18px; }}
                 table {{
                     border-collapse: collapse;
                     width: 100%;
                     max-width: 400px;
                     margin-top: 15px;
                 }}
-                th, td {{
-                    text-align: left;
-                    padding: 8px 12px;
-                    border-bottom: 1px solid #dee2e6;
-                }}
-                th {{
-                    background-color: #e9ecef;
-                    font-weight: bold;
-                }}
+                th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #dee2e6; }}
+                th {{ background-color: #e9ecef; font-weight: bold; }}
                 h3 {{
                     margin-top: 25px;
                     margin-bottom: 5px;
@@ -739,43 +646,23 @@ class AlertManager:
                     text-transform: uppercase;
                     letter-spacing: 0.05em;
                 }}
-                .footer {{
-                    margin-top: 30px;
-                    font-size: 12px;
-                    color: #6c757d;
-                }}
+                .footer {{ margin-top: 30px; font-size: 12px; color: #6c757d; }}
             </style>
         </head>
         <body>
             <div class="status-box">
-                <div class="status">{status}</div>
+                <div class="title">{html_module.escape(title)}</div>
                 <div>Time: {timestamp}</div>
             </div>
-
-            <h3>Run Statistics</h3>
             <table>
-                <tr><th>Metric</th><th>Value</th></tr>
-                <tr><td>Questions Requested</td><td>{requested_str}</td></tr>
-                <tr><td>Questions Generated</td><td>{generated}</td></tr>
-                <tr><td>Questions Rejected</td><td>{rejected_str}</td></tr>
-                <tr><td>Duplicates Found</td><td>{duplicates_str}</td></tr>
-                <tr><td>Questions Inserted</td><td>{inserted}</td></tr>
-                <tr><td>Approval Rate</td><td>{approval_str}</td></tr>
-                <tr><td>Duration</td><td>{duration_str}</td></tr>
+                <tr><th>Field</th><th>Value</th></tr>
+                {rows}
             </table>
-
-            {by_type_table}
-            {by_difficulty_table}
-            {error_section}
-
-            <div class="footer">
-                <p>This is an automated notification from the AIQ Question Generation Service.</p>
-                <p>Exit code: {exit_code}</p>
-            </div>
+            {metadata_section}
+            <div class="footer"><p>This is an automated notification.</p></div>
         </body>
         </html>
         """
-        return html
 
     def _build_alert_message(
         self,

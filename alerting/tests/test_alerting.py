@@ -9,11 +9,11 @@ These tests have no dependency on question-service packages.
 import json
 import os
 import tempfile
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from libs.alerting.alerting import (
+from alerting.alerting import (
     AlertManager,
     AlertingConfig,
     ErrorCategory,
@@ -69,41 +69,143 @@ class TestAlertManagerInit:
 
 
 # ---------------------------------------------------------------------------
-# AlertManager — send_run_completion
+# AlertManager — send_notification
 # ---------------------------------------------------------------------------
 
 
-class TestSendRunCompletion:
-    def test_success_no_email(self):
-        """send_run_completion succeeds without SMTP when email is disabled."""
+class TestSendNotification:
+    def test_noop_when_email_disabled_and_no_discord(self):
+        """send_notification is a no-op when email is disabled and no Discord URL."""
         mgr = AlertManager()
-        mgr.send_run_completion(
-            exit_code=0,
-            run_summary={
-                "generated": 5,
-                "inserted": 5,
-                "errors": 0,
-                "duration_seconds": 1.0,
-                "details": {},
-            },
+        mgr.send_notification(
+            title="Test",
+            fields=[("Generated", 5), ("Inserted", 5)],
+            severity="info",
         )
 
-    def test_failure_no_email(self):
+    def test_discord_noop_when_url_absent(self):
+        """No Discord call when discord_webhook_url is not set."""
         mgr = AlertManager()
-        mgr.send_run_completion(
-            exit_code=1,
-            run_summary={
-                "generated": 0,
-                "inserted": 0,
-                "errors": 3,
-                "duration_seconds": 0.5,
-                "details": {},
-            },
-        )
+        mgr._send_discord_alert = MagicMock(side_effect=AssertionError("should not be called"))
+        mgr.send_notification(title="Test", fields=[("Key", "Value")], severity="info")
 
-    def test_none_run_summary(self):
-        mgr = AlertManager()
-        mgr.send_run_completion(exit_code=0, run_summary=None)
+    def test_discord_post_error_does_not_raise(self):
+        """A Discord POST failure is swallowed — never propagates to caller."""
+        mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
+        mgr._send_discord_alert = MagicMock(side_effect=RuntimeError("network error"))
+        mgr.send_notification(title="Test", fields=[("Key", "Value")], severity="info")
+
+    def test_discord_called_with_green_for_info(self):
+        """severity='info' maps to DISCORD_COLOR_SUCCESS (green)."""
+        mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
+        mgr._send_discord_alert = MagicMock(return_value=True)
+        mgr.send_notification(title="All good", fields=[("Status", "ok")], severity="info")
+        _, kwargs = mgr._send_discord_alert.call_args
+        assert kwargs["color"] == AlertManager.DISCORD_COLOR_SUCCESS
+
+    def test_discord_called_with_yellow_for_warning(self):
+        """severity='warning' maps to DISCORD_COLOR_WARNING (yellow)."""
+        mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
+        mgr._send_discord_alert = MagicMock(return_value=True)
+        mgr.send_notification(title="Heads up", fields=[], severity="warning")
+        _, kwargs = mgr._send_discord_alert.call_args
+        assert kwargs["color"] == AlertManager.DISCORD_COLOR_WARNING
+
+    def test_discord_called_with_red_for_critical(self):
+        """severity='critical' maps to DISCORD_COLOR_CRITICAL (red)."""
+        mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
+        mgr._send_discord_alert = MagicMock(return_value=True)
+        mgr.send_notification(title="FIRE", fields=[], severity="critical")
+        _, kwargs = mgr._send_discord_alert.call_args
+        assert kwargs["color"] == AlertManager.DISCORD_COLOR_CRITICAL
+
+    def test_discord_embed_fields_contain_labels(self):
+        """Each (label, value) tuple becomes a Discord embed field."""
+        mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
+        mgr._send_discord_alert = MagicMock(return_value=True)
+        mgr.send_notification(
+            title="Run Complete",
+            fields=[("Generated", 50), ("Inserted", 47), ("Duration", "45.2s")],
+            severity="info",
+        )
+        _, kwargs = mgr._send_discord_alert.call_args
+        field_names = [f["name"] for f in kwargs["fields"]]
+        assert "Generated" in field_names
+        assert "Inserted" in field_names
+        assert "Duration" in field_names
+
+    def test_metadata_appended_as_discord_field(self):
+        """metadata dict is appended as a single 'Details' Discord embed field."""
+        mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
+        mgr._send_discord_alert = MagicMock(return_value=True)
+        mgr.send_notification(
+            title="Run Complete",
+            fields=[("Generated", 10)],
+            severity="info",
+            metadata={"env": "production", "version": "1.2"},
+        )
+        _, kwargs = mgr._send_discord_alert.call_args
+        field_names = [f["name"] for f in kwargs["fields"]]
+        assert "Details" in field_names
+
+    def test_smtp_error_caught_and_logged(self, caplog):
+        """SMTP errors are caught and logged, not raised."""
+        import smtplib
+        import logging
+
+        mgr = AlertManager(
+            email_enabled=True,
+            smtp_host="smtp.example.com",
+            smtp_port=587,
+            smtp_username="user@example.com",
+            smtp_password="test-password-not-real",  # pragma: allowlist secret
+            from_email="alerts@example.com",
+            to_emails=["recipient@example.com"],
+        )
+        with patch("smtplib.SMTP") as mock_smtp_class:
+            mock_smtp_class.return_value.__enter__.return_value.send_message.side_effect = (
+                smtplib.SMTPException("connection refused")
+            )
+            with caplog.at_level(logging.ERROR):
+                mgr.send_notification(title="Test", fields=[("Key", "val")], severity="info")
+
+        assert any("Failed to send notification email" in r.message for r in caplog.records)
+
+    def test_email_sent_when_enabled(self):
+        """Email is sent when email_enabled and SMTP is configured."""
+        from unittest.mock import MagicMock
+
+        mgr = AlertManager(
+            email_enabled=True,
+            smtp_host="smtp.example.com",
+            smtp_port=587,
+            smtp_username="user@example.com",
+            smtp_password="test-password-not-real",  # pragma: allowlist secret
+            from_email="alerts@example.com",
+            to_emails=["recipient@example.com"],
+        )
+        with patch("smtplib.SMTP") as mock_smtp_class:
+            mock_server = MagicMock()
+            mock_smtp_class.return_value.__enter__.return_value = mock_server
+            mgr.send_notification(
+                title="Run Complete",
+                fields=[("Generated", 10), ("Inserted", 8)],
+                severity="info",
+            )
+            mock_server.send_message.assert_called_once()
+
+    def test_dict_value_formatted_as_string(self):
+        """A dict value in fields is rendered as 'k: v' pairs."""
+        mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
+        mgr._send_discord_alert = MagicMock(return_value=True)
+        mgr.send_notification(
+            title="Run",
+            fields=[("By Type", {"math": 10, "logic": 8})],
+            severity="info",
+        )
+        _, kwargs = mgr._send_discord_alert.call_args
+        by_type_field = next(f for f in kwargs["fields"] if f["name"] == "By Type")
+        assert "math: 10" in by_type_field["value"] or "logic: 8" in by_type_field["value"]
 
 
 # ---------------------------------------------------------------------------
