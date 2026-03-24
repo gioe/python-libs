@@ -56,7 +56,10 @@ class ErrorCategory(str, Enum):
     SERVER_ERROR = "server_error"  # Provider server errors (5xx)
     NETWORK_ERROR = "network_error"  # Connection/timeout errors
     RESOURCE_LOW = "resource_low"  # A managed resource (inventory, quota, etc.) is low
+    INVENTORY_LOW = "inventory_low"  # Specific resource inventory below threshold
+    BILLING_QUOTA = "billing_quota"  # Provider billing quota or funds exhausted
     JOB_FAILURE = "job_failure"  # A scheduled or background job failed
+    SCRIPT_FAILURE = "script_failure"  # A script or batch process failed
     UNKNOWN = "unknown"  # Unclassified errors
 
 
@@ -692,6 +695,150 @@ class AlertManager:
         </html>
         """
 
+    @staticmethod
+    def _display_name(key: str) -> str:
+        """Convert an underscore-separated key to a title-cased display name."""
+        return key.replace("_", " ").title()
+
+    def _build_completion_text(self, errors: int, run_summary: dict) -> str:
+        """Build a plain-text completion summary email body.
+
+        Args:
+            errors: Number of errors encountered during the run (0 = success).
+            run_summary: Dict optionally containing a ``details`` sub-dict with
+                keys: ``questions_requested``, ``questions_rejected``,
+                ``duplicates_found``, ``by_type``, ``by_difficulty``,
+                ``error_message``.
+        """
+        details = run_summary.get("details", {}) if run_summary else {}
+
+        def _val(key: str) -> str:
+            v = details.get(key)
+            return str(v) if v is not None else "N/A"
+
+        lines = [
+            f"Questions Requested: {_val('questions_requested')}",
+            f"Questions Rejected:  {_val('questions_rejected')}",
+            f"Duplicates Found:    {_val('duplicates_found')}",
+        ]
+
+        by_type = details.get("by_type") or {}
+        if by_type:
+            lines.append("\nBy Type:")
+            for k, v in by_type.items():
+                lines.append(f"  {k}: {v}")
+
+        by_difficulty = details.get("by_difficulty") or {}
+        if by_difficulty:
+            lines.append("\nBy Difficulty:")
+            for k, v in by_difficulty.items():
+                lines.append(f"  {k}: {v}")
+
+        error_message = details.get("error_message")
+        if errors and error_message:
+            lines.append(f"\nError: {error_message}")
+
+        return "\n".join(lines)
+
+    def _build_completion_html(self, errors: int, run_summary: dict) -> str:
+        """Build an HTML completion summary email body.
+
+        Args:
+            errors: Number of errors encountered during the run (0 = success).
+            run_summary: Same structure as ``_build_completion_text``.
+        """
+        details = run_summary.get("details", {}) if run_summary else {}
+
+        def _val(key: str) -> str:
+            v = details.get(key)
+            return str(v) if v is not None else "N/A"
+
+        stat_rows = (
+            f"<tr><td>Questions Requested</td><td>{html_module.escape(_val('questions_requested'))}</td></tr>"
+            f"<tr><td>Questions Rejected</td><td>{html_module.escape(_val('questions_rejected'))}</td></tr>"
+            f"<tr><td>Duplicates Found</td><td>{html_module.escape(_val('duplicates_found'))}</td></tr>"
+        )
+
+        by_type = details.get("by_type") or {}
+        by_type_section = ""
+        if by_type:
+            rows = "".join(
+                f"<tr><td>{html_module.escape(self._display_name(k))}</td>"
+                f"<td>{html_module.escape(str(v))}</td></tr>"
+                for k, v in by_type.items()
+            )
+            by_type_section = f"""
+            <h3>By Type</h3>
+            <table>
+                <tr><th>Type</th><th>Inserted</th></tr>
+                {rows}
+            </table>"""
+
+        by_difficulty = details.get("by_difficulty") or {}
+        by_difficulty_section = ""
+        if by_difficulty:
+            rows = "".join(
+                f"<tr><td>{html_module.escape(self._display_name(k))}</td>"
+                f"<td>{html_module.escape(str(v))}</td></tr>"
+                for k, v in by_difficulty.items()
+            )
+            by_difficulty_section = f"""
+            <h3>By Difficulty</h3>
+            <table>
+                <tr><th>Difficulty</th><th>Count</th></tr>
+                {rows}
+            </table>"""
+
+        error_message = details.get("error_message")
+        error_section = ""
+        if errors and error_message:
+            error_section = f"""
+            <div class="error-box">
+                <strong>Error:</strong> {html_module.escape(str(error_message))}
+            </div>"""
+
+        return f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                table {{
+                    border-collapse: collapse;
+                    width: 100%;
+                    max-width: 400px;
+                    margin-top: 15px;
+                }}
+                th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #dee2e6; }}
+                th {{ background-color: #e9ecef; font-weight: bold; }}
+                h3 {{
+                    margin-top: 25px;
+                    margin-bottom: 5px;
+                    font-size: 14px;
+                    color: #495057;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                }}
+                .error-box {{
+                    border-left: 4px solid #dc3545;
+                    padding: 12px;
+                    background-color: #f8d7da;
+                    margin: 20px 0;
+                    color: #721c24;
+                }}
+            </style>
+        </head>
+        <body>
+            <table>
+                <tr><th>Field</th><th>Value</th></tr>
+                {stat_rows}
+            </table>
+            {by_type_section}
+            {by_difficulty_section}
+            {error_section}
+        </body>
+        </html>
+        """
+
     def _build_alert_message(
         self,
         classified_error: "AlertableError",
@@ -743,6 +890,30 @@ class AlertManager:
                     "2. Check if API key has expired",
                     "3. Regenerate API key if necessary",
                     "4. Update environment variables with new key",
+                ]
+            )
+        elif category_val == ErrorCategory.BILLING_QUOTA:
+            lines.extend(
+                [
+                    f"1. Check your {classified_error.provider} account balance and update billing information",
+                    "2. Verify payment method is current",
+                    "3. Contact provider support if billing issue persists",
+                ]
+            )
+        elif category_val == ErrorCategory.INVENTORY_LOW:
+            lines.extend(
+                [
+                    "1. Review resource inventory levels and replenish as needed",
+                    "2. Investigate root cause of inventory depletion",
+                    "3. Adjust thresholds or generation parameters if needed",
+                ]
+            )
+        elif category_val == ErrorCategory.SCRIPT_FAILURE:
+            lines.extend(
+                [
+                    f"1. Check {classified_error.provider} script logs for error details",
+                    "2. Review recent changes that may have caused the failure",
+                    "3. Re-run individual failed components if applicable",
                 ]
             )
         else:
