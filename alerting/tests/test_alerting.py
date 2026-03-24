@@ -19,9 +19,9 @@ from alerting.alerting import (
     AlertingConfig,
     ErrorCategory,
     ErrorSeverity,
-    InventoryAlertManager,
-    InventoryAlertResult,
-    StratumAlert,
+    ResourceMonitor,
+    ResourceMonitorResult,
+    ResourceStatus,
 )
 
 
@@ -210,35 +210,40 @@ class TestSendNotification:
 
 
 # ---------------------------------------------------------------------------
-# _log_inventory_check — JSON output
+# _log_resource_check — JSON output
 # ---------------------------------------------------------------------------
 
 
-class TestLogInventoryCheck:
+class TestLogResourceCheck:
     def test_writes_valid_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             alert_file = os.path.join(tmpdir, "alerts.log")
             config = AlertingConfig(
-                inventory_alert_file=alert_file,
+                resource_alert_file=alert_file,
                 log_all_checks=True,
             )
             alert_manager = AlertManager()
-            mgr = InventoryAlertManager(alert_manager=alert_manager, config=config)
+            resources = [ResourceStatus(name="queue-A", count=100)]
+            mgr = ResourceMonitor(
+                check_fn=lambda: resources,
+                alert_manager=alert_manager,
+                config=config,
+            )
 
-            result = InventoryAlertResult()
-            result.strata_checked = 10
-            result.healthy_strata = 10
-            result.warning_strata = []
-            result.critical_strata = []
+            result = ResourceMonitorResult()
+            result.resources_checked = 10
+            result.healthy_resources = 10
+            result.warning_resources = []
+            result.critical_resources = []
 
-            mgr._log_inventory_check(result)
+            mgr._log_resource_check(result)
 
             with open(alert_file) as f:
                 line = f.readline().strip()
 
             parsed = json.loads(line)  # must not raise
-            assert parsed["type"] == "inventory_check"
-            assert parsed["strata_checked"] == 10
+            assert parsed["type"] == "resource_check"
+            assert parsed["resources_checked"] == 10
 
 
 # ---------------------------------------------------------------------------
@@ -340,10 +345,10 @@ class TestServiceName:
         finally:
             os.unlink(tmp_path)
 
-    def test_inventory_alert_manager_syncs_service_name_to_alert_manager(self):
+    def test_resource_monitor_syncs_service_name_to_alert_manager(self):
         am = AlertManager()  # default service_name = "Alerting Service"
         config = AlertingConfig(service_name="Synced Service")
-        InventoryAlertManager(alert_manager=am, config=config)
+        ResourceMonitor(check_fn=lambda: [], alert_manager=am, config=config)
         assert am.service_name == "Synced Service"
 
 
@@ -431,32 +436,74 @@ class TestSendAlertDiscordRouting:
 
 
 # ---------------------------------------------------------------------------
-# _build_inventory_context — no duplicate Recommended Actions section
+# _build_resource_context — no duplicate Recommended Actions section
 # ---------------------------------------------------------------------------
 
 
-class TestInventoryContext:
+class TestResourceContext:
     def test_no_duplicate_recommended_actions_section(self):
         """Recommended Actions must appear exactly once in the full alert message."""
         import tempfile, os
         config = AlertingConfig(
             service_name="TestSvc",
             include_recommendations=True,
-            inventory_alert_file=os.path.join(tempfile.mkdtemp(), "alerts.log"),
+            resource_alert_file=os.path.join(tempfile.mkdtemp(), "alerts.log"),
         )
         am = AlertManager()
-        inv_mgr = InventoryAlertManager(alert_manager=am, config=config)
+        monitor = ResourceMonitor(check_fn=lambda: [], alert_manager=am, config=config)
 
-        strata = [
-            StratumAlert(
-                question_type="math",
-                difficulty="easy",
-                current_count=2,
-                threshold=5,
-                severity=ErrorSeverity.CRITICAL,
-            )
-        ]
-        alert_error = inv_mgr._build_inventory_error(strata, ErrorSeverity.CRITICAL)
-        context = inv_mgr._build_inventory_context(strata)
+        resources = [ResourceStatus(name="queue-math-easy", count=2)]
+        threshold = config.critical_min
+        alert_error = monitor._build_resource_error(
+            resources, ErrorSeverity.CRITICAL, threshold
+        )
+        context = monitor._build_resource_context(resources, threshold)
         msg = am._build_alert_message(alert_error, context)
         assert msg.count("Recommended Actions:") == 1
+
+    def test_check_and_alert_calls_check_fn(self):
+        """check_and_alert invokes check_fn and classifies resources correctly."""
+        config = AlertingConfig(critical_min=5, warning_min=20, healthy_min=50)
+        am = AlertManager()
+
+        resources = [
+            ResourceStatus(name="queue-A", count=2),   # critical
+            ResourceStatus(name="queue-B", count=15),  # warning
+            ResourceStatus(name="queue-C", count=60),  # healthy
+        ]
+        monitor = ResourceMonitor(
+            check_fn=lambda: resources, alert_manager=am, config=config
+        )
+        # Patch send_alert to avoid real IO
+        am.send_alert = MagicMock(return_value=True)
+
+        result = monitor.check_and_alert()
+
+        assert result.resources_checked == 3
+        assert len(result.critical_resources) == 1
+        assert result.critical_resources[0].name == "queue-A"
+        assert len(result.warning_resources) == 1
+        assert result.warning_resources[0].name == "queue-B"
+        assert result.healthy_resources == 1
+
+    def test_cooldown_suppresses_repeat_alerts(self):
+        """A resource in cooldown does not trigger a second alert."""
+        config = AlertingConfig(
+            critical_min=5,
+            warning_min=20,
+            healthy_min=50,
+            per_resource_cooldown_minutes=60,
+        )
+        am = AlertManager()
+        am.send_alert = MagicMock(return_value=True)
+
+        resources = [ResourceStatus(name="queue-A", count=2)]
+        monitor = ResourceMonitor(
+            check_fn=lambda: resources, alert_manager=am, config=config
+        )
+
+        monitor.check_and_alert()  # first check — alert sent
+        result = monitor.check_and_alert()  # second check — in cooldown
+
+        assert am.send_alert.call_count == 1
+        assert result.alerts_suppressed >= 1
