@@ -32,3 +32,9 @@ packages = [
 
 [tool.setuptools.package-dir]
 "gioe_libs" = "."
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
