@@ -1,52 +1,33 @@
-"""Shared domain types for AIQ services.
+"""Shared domain types for Python microservices.
 
-This package is the single source of truth for domain enums used across
-the backend, question-service, and (indirectly via OpenAPI) the iOS app.
+This package provides generic, reusable domain primitives applicable across
+unrelated projects. It is not a home for application-specific enums.
 
 Usage:
-    from libs.domain_types import QuestionType, DifficultyLevel
+    from domain_types import DifficultyLevel, SessionStatus
 """
 
 import enum
 
 
-class QuestionType(str, enum.Enum):
-    """Types of IQ test questions."""
-
-    PATTERN = "pattern"
-    LOGIC = "logic"
-    SPATIAL = "spatial"
-    MATH = "math"
-    VERBAL = "verbal"
-    MEMORY = "memory"
-
-
 class DifficultyLevel(str, enum.Enum):
-    """Difficulty levels for questions."""
+    """Difficulty levels applicable to any gradable content."""
 
     EASY = "easy"
     MEDIUM = "medium"
     HARD = "hard"
 
 
-class TestStatus(str, enum.Enum):
-    """Test session status."""
+class SessionStatus(str, enum.Enum):
+    """Generic status for a session or workflow run."""
 
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
 
 
-class NotificationType(str, enum.Enum):
-    """Notification type for APNs push notifications."""
-
-    TEST_REMINDER = "test_reminder"
-    DAY_30_REMINDER = "day_30_reminder"
-    LOGOUT_ALL = "logout_all"
-
-
 class GenerationRunStatus(str, enum.Enum):
-    """Status for question generation runs."""
+    """Status for an async generation or processing run."""
 
     RUNNING = "running"
     SUCCESS = "success"
@@ -67,7 +48,7 @@ class EducationLevel(str, enum.Enum):
 
 
 class FeedbackCategory(str, enum.Enum):
-    """Feedback category."""
+    """Category for user-submitted feedback."""
 
     BUG_REPORT = "bug_report"
     FEATURE_REQUEST = "feature_request"
@@ -77,7 +58,7 @@ class FeedbackCategory(str, enum.Enum):
 
 
 class FeedbackStatus(str, enum.Enum):
-    """Feedback submission status."""
+    """Processing status for a feedback submission."""
 
     PENDING = "pending"
     REVIEWED = "reviewed"
@@ -85,10 +66,8 @@ class FeedbackStatus(str, enum.Enum):
 
 
 __all__ = [
-    "QuestionType",
     "DifficultyLevel",
-    "TestStatus",
-    "NotificationType",
+    "SessionStatus",
     "GenerationRunStatus",
     "EducationLevel",
     "FeedbackCategory",
