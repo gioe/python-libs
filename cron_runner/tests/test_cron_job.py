@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cron_runner.cron_job import CronJob
+from cron_runner.cron_job import CronJob, _run_summary_to_fields
 
 
 # ---------------------------------------------------------------------------
@@ -398,3 +398,59 @@ def test_no_service_imports() -> None:
         assert pattern not in source, (
             f"Found forbidden import pattern {pattern!r} in libs/cron_runner/cron_job.py"
         )
+
+
+# ---------------------------------------------------------------------------
+# _run_summary_to_fields — unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunSummaryToFields:
+    def test_empty_dict_returns_empty_list(self) -> None:
+        assert _run_summary_to_fields({}) == []
+
+    def test_scalar_values_included(self) -> None:
+        fields = _run_summary_to_fields({"generated": 10, "inserted": 8})
+        labels = [label for label, _ in fields]
+        assert "Generated" in labels
+        assert "Inserted" in labels
+
+    def test_none_values_excluded(self) -> None:
+        fields = _run_summary_to_fields({"generated": 5, "errors": None})
+        labels = [label for label, _ in fields]
+        assert "Errors" not in labels
+        assert "Generated" in labels
+
+    def test_duration_seconds_formatted_as_string(self) -> None:
+        fields = _run_summary_to_fields({"duration_seconds": 12.345})
+        field_map = dict(fields)
+        assert field_map["Duration Seconds"] == "12.3s"
+
+    def test_duration_seconds_integer_formatted(self) -> None:
+        fields = _run_summary_to_fields({"duration_seconds": 7})
+        field_map = dict(fields)
+        assert field_map["Duration Seconds"] == "7.0s"
+
+    def test_details_sub_dict_flattened(self) -> None:
+        fields = _run_summary_to_fields({
+            "generated": 3,
+            "details": {"approval_rate": 90.0, "by_type": {"math": 2}},
+        })
+        labels = [label for label, _ in fields]
+        assert "Generated" in labels
+        assert "Approval Rate" in labels
+        assert "By Type" in labels
+        # The "details" key itself must not appear as a field
+        assert "Details" not in labels
+
+    def test_details_none_values_excluded(self) -> None:
+        fields = _run_summary_to_fields({"details": {"ok": 1, "skipped": None}})
+        labels = [label for label, _ in fields]
+        assert "Skipped" not in labels
+        assert "Ok" in labels
+
+    def test_dict_value_passes_through_untouched(self) -> None:
+        by_type = {"math": 5, "logic": 3}
+        fields = _run_summary_to_fields({"by_type": by_type})
+        field_map = dict(fields)
+        assert field_map["By Type"] == by_type

@@ -502,6 +502,15 @@ class AlertManager:
             metadata: Optional dict rendered as a secondary section at the end of
                 both the email body and the Discord embed.
         """
+        _VALID_SEVERITIES = {"info", "warning", "critical"}
+        if severity.lower() not in _VALID_SEVERITIES:
+            logger.warning(
+                "send_notification() received unknown severity %r; defaulting to 'info'. "
+                "Valid values: %s",
+                severity,
+                ", ".join(sorted(_VALID_SEVERITIES)),
+            )
+
         if self.email_enabled:
             try:
                 text_body = self._build_notification_text(title, fields, severity, metadata)
