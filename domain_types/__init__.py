@@ -4,7 +4,7 @@ This package provides generic, reusable domain primitives applicable across
 unrelated projects. It is not a home for application-specific enums.
 
 Usage:
-    from domain_types import DifficultyLevel, SessionStatus
+    from domain_types import DifficultyLevel, AsyncRunStatus
 """
 
 import enum
@@ -26,35 +26,13 @@ class SessionStatus(str, enum.Enum):
     ABANDONED = "abandoned"
 
 
-class GenerationRunStatus(str, enum.Enum):
-    """Status for an async generation or processing run."""
+class AsyncRunStatus(str, enum.Enum):
+    """Status for any async job or processing run."""
 
     RUNNING = "running"
     SUCCESS = "success"
     PARTIAL_FAILURE = "partial_failure"
     FAILED = "failed"
-
-
-class EducationLevel(str, enum.Enum):
-    """Education level for demographic data."""
-
-    HIGH_SCHOOL = "high_school"
-    SOME_COLLEGE = "some_college"
-    ASSOCIATES = "associates"
-    BACHELORS = "bachelors"
-    MASTERS = "masters"
-    DOCTORATE = "doctorate"
-    PREFER_NOT_TO_SAY = "prefer_not_to_say"
-
-
-class FeedbackCategory(str, enum.Enum):
-    """Category for user-submitted feedback."""
-
-    BUG_REPORT = "bug_report"
-    FEATURE_REQUEST = "feature_request"
-    GENERAL_FEEDBACK = "general_feedback"
-    QUESTION_HELP = "question_help"
-    OTHER = "other"
 
 
 class FeedbackStatus(str, enum.Enum):
@@ -68,8 +46,6 @@ class FeedbackStatus(str, enum.Enum):
 __all__ = [
     "DifficultyLevel",
     "SessionStatus",
-    "GenerationRunStatus",
-    "EducationLevel",
-    "FeedbackCategory",
+    "AsyncRunStatus",
     "FeedbackStatus",
 ]

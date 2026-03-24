@@ -7,9 +7,7 @@ import pytest
 from domain_types import (
     DifficultyLevel,
     SessionStatus,
-    GenerationRunStatus,
-    EducationLevel,
-    FeedbackCategory,
+    AsyncRunStatus,
     FeedbackStatus,
 )
 
@@ -47,40 +45,17 @@ class TestSessionStatus:
         assert SessionStatus("completed") == SessionStatus.COMPLETED
 
 
-class TestGenerationRunStatus:
-    """Tests for GenerationRunStatus enum."""
+class TestAsyncRunStatus:
+    """Tests for AsyncRunStatus enum."""
 
     def test_values(self):
-        assert GenerationRunStatus.RUNNING.value == "running"
-        assert GenerationRunStatus.SUCCESS.value == "success"
-        assert GenerationRunStatus.PARTIAL_FAILURE.value == "partial_failure"
-        assert GenerationRunStatus.FAILED.value == "failed"
+        assert AsyncRunStatus.RUNNING.value == "running"
+        assert AsyncRunStatus.SUCCESS.value == "success"
+        assert AsyncRunStatus.PARTIAL_FAILURE.value == "partial_failure"
+        assert AsyncRunStatus.FAILED.value == "failed"
 
     def test_count(self):
-        assert len(GenerationRunStatus) == 4
-
-
-class TestEducationLevel:
-    """Tests for EducationLevel enum."""
-
-    def test_values(self):
-        assert EducationLevel.HIGH_SCHOOL.value == "high_school"
-        assert EducationLevel.DOCTORATE.value == "doctorate"
-        assert EducationLevel.PREFER_NOT_TO_SAY.value == "prefer_not_to_say"
-
-    def test_count(self):
-        assert len(EducationLevel) == 7
-
-
-class TestFeedbackCategory:
-    """Tests for FeedbackCategory enum."""
-
-    def test_values(self):
-        assert FeedbackCategory.BUG_REPORT.value == "bug_report"
-        assert FeedbackCategory.OTHER.value == "other"
-
-    def test_count(self):
-        assert len(FeedbackCategory) == 5
+        assert len(AsyncRunStatus) == 4
 
 
 class TestFeedbackStatus:
@@ -102,9 +77,7 @@ class TestAllEnumsAreStrSubclass:
         for enum_cls in [
             DifficultyLevel,
             SessionStatus,
-            GenerationRunStatus,
-            EducationLevel,
-            FeedbackCategory,
+            AsyncRunStatus,
             FeedbackStatus,
         ]:
             for member in enum_cls:
