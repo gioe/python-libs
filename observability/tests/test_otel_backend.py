@@ -18,8 +18,8 @@ from unittest import mock
 
 import pytest
 
-from libs.observability.config import OTELConfig
-from libs.observability.otel_backend import (
+from observability.config import OTELConfig
+from observability.otel_backend import (
     OTELBackend,
     _check_label_cardinality,
     _parse_otlp_headers,
@@ -30,9 +30,9 @@ from libs.observability.otel_backend import (
 class TestOTELBackendInitWithConsoleExporter:
     """Tests for OTEL backend initialization with console exporter (mocked)."""
 
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_tracing")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_metrics")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._create_resource")
+    @mock.patch("observability.otel_backend.OTELBackend._init_tracing")
+    @mock.patch("observability.otel_backend.OTELBackend._init_metrics")
+    @mock.patch("observability.otel_backend.OTELBackend._create_resource")
     def test_init_console_exporter_traces_only(
         self,
         mock_create_resource: mock.MagicMock,
@@ -60,9 +60,9 @@ class TestOTELBackendInitWithConsoleExporter:
         mock_init_tracing.assert_called_once_with(mock_resource, {})
         mock_init_metrics.assert_not_called()
 
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_tracing")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_metrics")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._create_resource")
+    @mock.patch("observability.otel_backend.OTELBackend._init_tracing")
+    @mock.patch("observability.otel_backend.OTELBackend._init_metrics")
+    @mock.patch("observability.otel_backend.OTELBackend._create_resource")
     def test_init_console_exporter_metrics_only(
         self,
         mock_create_resource: mock.MagicMock,
@@ -89,10 +89,10 @@ class TestOTELBackendInitWithConsoleExporter:
         mock_init_tracing.assert_not_called()
         mock_init_metrics.assert_called_once_with(mock_resource, {})
 
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_logs")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_tracing")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_metrics")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._create_resource")
+    @mock.patch("observability.otel_backend.OTELBackend._init_logs")
+    @mock.patch("observability.otel_backend.OTELBackend._init_tracing")
+    @mock.patch("observability.otel_backend.OTELBackend._init_metrics")
+    @mock.patch("observability.otel_backend.OTELBackend._create_resource")
     def test_init_console_exporter_all_signals(
         self,
         mock_create_resource: mock.MagicMock,
@@ -123,8 +123,8 @@ class TestOTELBackendInitWithConsoleExporter:
         mock_init_metrics.assert_called_once()
         mock_init_logs.assert_called_once()
 
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_tracing")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._create_resource")
+    @mock.patch("observability.otel_backend.OTELBackend._init_tracing")
+    @mock.patch("observability.otel_backend.OTELBackend._create_resource")
     def test_init_logs_info_on_success(
         self,
         mock_create_resource: mock.MagicMock,
@@ -144,7 +144,7 @@ class TestOTELBackendInitWithConsoleExporter:
         )
         backend = OTELBackend(config)
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.init()
             # Should log at least one info message about initialization
             assert mock_logger.info.called
@@ -153,8 +153,8 @@ class TestOTELBackendInitWithConsoleExporter:
 class TestOTELBackendInitWithOTLPExporter:
     """Tests for OTEL backend initialization with OTLP exporter (mocked)."""
 
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_tracing")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._create_resource")
+    @mock.patch("observability.otel_backend.OTELBackend._init_tracing")
+    @mock.patch("observability.otel_backend.OTELBackend._create_resource")
     def test_init_otlp_without_endpoint_logs_warning(
         self,
         mock_create_resource: mock.MagicMock,
@@ -179,8 +179,8 @@ class TestOTELBackendInitWithOTLPExporter:
         assert result is True
         mock_init_tracing.assert_called_once()
 
-    @mock.patch("libs.observability.otel_backend.OTELBackend._init_tracing")
-    @mock.patch("libs.observability.otel_backend.OTELBackend._create_resource")
+    @mock.patch("observability.otel_backend.OTELBackend._init_tracing")
+    @mock.patch("observability.otel_backend.OTELBackend._create_resource")
     def test_init_otlp_with_headers_parses_correctly(
         self,
         mock_create_resource: mock.MagicMock,
@@ -222,10 +222,10 @@ class TestOTELBackendInitErrors:
         backend = OTELBackend(config)
 
         with mock.patch(
-            "libs.observability.otel_backend.OTELBackend._create_resource",
+            "observability.otel_backend.OTELBackend._create_resource",
             side_effect=ImportError("opentelemetry not installed"),
         ):
-            with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+            with mock.patch("observability.otel_backend.logger") as mock_logger:
                 result = backend.init()
 
                 assert result is False
@@ -242,10 +242,10 @@ class TestOTELBackendInitErrors:
         backend = OTELBackend(config)
 
         with mock.patch(
-            "libs.observability.otel_backend.OTELBackend._create_resource",
+            "observability.otel_backend.OTELBackend._create_resource",
             side_effect=RuntimeError("unexpected error"),
         ):
-            with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+            with mock.patch("observability.otel_backend.logger") as mock_logger:
                 result = backend.init()
 
                 assert result is False
@@ -275,7 +275,7 @@ class TestOTELBackendTracingInit:
                 mock_resource.return_value = mock.MagicMock()
                 mock_init_tracing.return_value = True
 
-                with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+                with mock.patch("observability.otel_backend.logger") as mock_logger:
                     backend.init()
                     # Verify info logging happens
                     assert mock_logger.info.called
@@ -336,7 +336,7 @@ class TestOTELBackendTracingIntegration:
         )
         backend = OTELBackend(config)
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             result = backend.init()
 
             assert result is True
@@ -469,7 +469,7 @@ class TestOTELBackendLogsInit:
         backend = OTELBackend(config)
 
         with mock.patch.dict("sys.modules", {"opentelemetry._logs": None}):
-            with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+            with mock.patch("observability.otel_backend.logger") as mock_logger:
                 backend._init_logs(mock_resource, {})
                 mock_logger.warning.assert_called()
 
@@ -533,7 +533,7 @@ class TestOTELBackendLogsInit:
         backend = OTELBackend(config)
 
         with mock.patch.dict("sys.modules", {"opentelemetry.exporter.otlp.proto.http._log_exporter": None}):
-            with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+            with mock.patch("observability.otel_backend.logger") as mock_logger:
                 backend._init_logs(mock_resource, {})
                 mock_logger.warning.assert_called()
 
@@ -708,7 +708,7 @@ class TestOTELBackendFlushWithProviderErrors:
         backend._meter_provider = mock.MagicMock()
         backend._logger_provider = mock.MagicMock()
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.flush()
 
             # Should log warning but continue
@@ -727,7 +727,7 @@ class TestOTELBackendFlushWithProviderErrors:
         backend._logger_provider = mock.MagicMock()
         backend._logger_provider.force_flush.side_effect = RuntimeError("logger flush failed")
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.flush()
 
             # Should log warning
@@ -753,7 +753,7 @@ class TestOTELBackendShutdownWithProviderErrors:
         backend._meter_provider = mock_meter_provider
         backend._logger_provider = mock_logger_provider
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.shutdown()
 
             # Should log warning but continue
@@ -777,7 +777,7 @@ class TestOTELBackendShutdownWithProviderErrors:
         backend._meter_provider.shutdown.side_effect = RuntimeError("meter shutdown failed")
         backend._logger_provider = mock.MagicMock()
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.shutdown()
 
             # Should log warning
@@ -795,7 +795,7 @@ class TestOTELBackendShutdownWithProviderErrors:
         backend._logger_provider = mock.MagicMock()
         backend._logger_provider.shutdown.side_effect = RuntimeError("logger shutdown failed")
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.shutdown()
 
             # Should log warning
@@ -979,67 +979,67 @@ class TestLabelCardinalityAdditionalPatterns:
 
     def test_warns_on_uid_variant(self) -> None:
         """Test warning on uid label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"uid": "12345"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_trace_id(self) -> None:
         """Test warning on trace_id label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"trace_id": "abc123"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_span_id(self) -> None:
         """Test warning on span_id label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"span_id": "xyz789"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_uuid_label(self) -> None:
         """Test warning on uuid label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"uuid": "abc-123-def"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_id_label(self) -> None:
         """Test warning on generic 'id' label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"id": "12345"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_ip_variant(self) -> None:
         """Test warning on ip label (without address suffix)."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"ip": "192.168.1.1"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_date_label(self) -> None:
         """Test warning on date label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"date": "2024-01-15"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_time_label(self) -> None:
         """Test warning on time label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"time": "10:30:00"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_guid_label(self) -> None:
         """Test warning on guid label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"guid": "abc-def-ghi"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_sid_label(self) -> None:
         """Test warning on sid (session id) label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"sid": "session123"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_req_id_label(self) -> None:
         """Test warning on req_id label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"req_id": "req123"}, "requests")
             mock_logger.warning.assert_called_once()
 

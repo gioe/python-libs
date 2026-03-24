@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 
-from libs.observability.config import (
+from observability.config import (
     ConfigurationError,
     ObservabilityConfig,
     OTELConfig,
@@ -621,7 +621,7 @@ class TestYAMLLoading:
         import builtins
         import sys
 
-        import libs.observability.config as config_module
+        import observability.config as config_module
 
         # Save original import and remove yaml from sys.modules cache
         original_import = builtins.__import__

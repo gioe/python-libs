@@ -25,7 +25,7 @@ import pytest
 import responses
 import yaml
 
-from libs.observability.config import (
+from observability.config import (
     ConfigurationError,
     ObservabilityConfig,
     OTELConfig,
@@ -33,7 +33,7 @@ from libs.observability.config import (
     SentryConfig,
     load_config,
 )
-from libs.observability.facade import ObservabilityFacade
+from observability.facade import ObservabilityFacade
 
 
 # ==============================================================================
@@ -48,7 +48,7 @@ class TestEndToEndInitialization:
         """Test initialization succeeds with valid Sentry configuration."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(
                     enabled=True,
@@ -60,7 +60,7 @@ class TestEndToEndInitialization:
             mock_load.return_value = mock_config
 
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend.init", return_value=True
+                "observability.sentry_backend.SentryBackend.init", return_value=True
             ):
                 result = facade.init()
 
@@ -71,7 +71,7 @@ class TestEndToEndInitialization:
         """Test OTEL initialization with endpoint connectivity."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),
                 otel=OTELConfig(
@@ -85,7 +85,7 @@ class TestEndToEndInitialization:
 
             # Mock OTEL backend init
             with mock.patch(
-                "libs.observability.otel_backend.OTELBackend.init", return_value=True
+                "observability.otel_backend.OTELBackend.init", return_value=True
             ):
                 result = facade.init()
 
@@ -96,7 +96,7 @@ class TestEndToEndInitialization:
         """Test initialization handles invalid Sentry DSN gracefully."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             # Invalid DSN format should fail validation
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(
@@ -110,7 +110,7 @@ class TestEndToEndInitialization:
 
             # Sentry backend init will fail with invalid DSN
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend.init", return_value=False
+                "observability.sentry_backend.SentryBackend.init", return_value=False
             ):
                 result = facade.init()
 
@@ -122,7 +122,7 @@ class TestEndToEndInitialization:
         """Test that calling init() multiple times is safe."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=True, dsn="https://test@sentry.io/123"),
                 otel=OTELConfig(enabled=True, service_name="test"),
@@ -130,9 +130,9 @@ class TestEndToEndInitialization:
             mock_load.return_value = mock_config
 
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend"
+                "observability.sentry_backend.SentryBackend"
             ) as mock_sentry_cls, mock.patch(
-                "libs.observability.otel_backend.OTELBackend"
+                "observability.otel_backend.OTELBackend"
             ) as mock_otel_cls, mock.patch(
                 "atexit.register"
             ):
@@ -149,7 +149,7 @@ class TestEndToEndInitialization:
                 assert result1 is True
 
                 # Second init should warn and return True
-                with mock.patch("libs.observability.facade.logger") as mock_logger:
+                with mock.patch("observability.facade.logger") as mock_logger:
                     result2 = facade.init()
                     assert result2 is True
                     mock_logger.warning.assert_called_once()
@@ -165,7 +165,7 @@ class TestEndToEndInitialization:
         """Test complete initialization workflow with both backends enabled."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(
                     enabled=True,
@@ -185,9 +185,9 @@ class TestEndToEndInitialization:
             mock_load.return_value = mock_config
 
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend.init", return_value=True
+                "observability.sentry_backend.SentryBackend.init", return_value=True
             ), mock.patch(
-                "libs.observability.otel_backend.OTELBackend.init", return_value=True
+                "observability.otel_backend.OTELBackend.init", return_value=True
             ), mock.patch(
                 "atexit.register"
             ):
@@ -218,7 +218,7 @@ class TestConcurrentMetricRecording:
         )
 
         # Create a real OTEL backend for thread safety testing
-        from libs.observability.otel_backend import OTELBackend
+        from observability.otel_backend import OTELBackend
 
         backend = OTELBackend(facade._config.otel)
         backend._config.exporter = "none"  # Don't actually export
@@ -278,7 +278,7 @@ class TestConcurrentMetricRecording:
             otel=OTELConfig(service_name="test"),
         )
 
-        from libs.observability.otel_backend import OTELBackend
+        from observability.otel_backend import OTELBackend
 
         backend = OTELBackend(facade._config.otel)
         backend._config.exporter = "none"
@@ -336,7 +336,7 @@ class TestConcurrentMetricRecording:
             otel=OTELConfig(service_name="test"),
         )
 
-        from libs.observability.otel_backend import OTELBackend
+        from observability.otel_backend import OTELBackend
 
         backend = OTELBackend(facade._config.otel)
         backend._config.exporter = "none"
@@ -730,7 +730,7 @@ class TestErrorRecovery:
 
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(
                     enabled=True,
@@ -742,7 +742,7 @@ class TestErrorRecovery:
 
             # Sentry init should fail but not crash the app
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend.init",
+                "observability.sentry_backend.SentryBackend.init",
                 side_effect=ConnectionError("Connection refused"),
             ):
                 result = facade.init()
@@ -763,7 +763,7 @@ class TestErrorRecovery:
 
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(
                     enabled=True,
@@ -774,7 +774,7 @@ class TestErrorRecovery:
             mock_load.return_value = mock_config
 
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend.init",
+                "observability.sentry_backend.SentryBackend.init",
                 side_effect=TimeoutError("Request timed out"),
             ):
                 result = facade.init()
@@ -787,7 +787,7 @@ class TestErrorRecovery:
         """Test graceful degradation when OTEL endpoint is unreachable."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),
                 otel=OTELConfig(
@@ -801,7 +801,7 @@ class TestErrorRecovery:
 
             # OTEL init should handle unreachable endpoint
             with mock.patch(
-                "libs.observability.otel_backend.OTELBackend.init",
+                "observability.otel_backend.OTELBackend.init",
                 side_effect=ConnectionError("Cannot connect to OTEL endpoint"),
             ):
                 result = facade.init()
@@ -894,7 +894,7 @@ class TestErrorRecovery:
         facade._otel_backend = mock_otel
 
         # Flush should not raise
-        with mock.patch("libs.observability.facade.logger") as mock_logger:
+        with mock.patch("observability.facade.logger") as mock_logger:
             facade.flush(timeout=2.0)
 
             # Should log warnings for both failures
@@ -916,7 +916,7 @@ class TestErrorRecovery:
         facade._otel_backend = mock_otel
 
         # Shutdown should not raise
-        with mock.patch("libs.observability.facade.logger") as mock_logger:
+        with mock.patch("observability.facade.logger") as mock_logger:
             facade.shutdown()
 
             # Should log warnings for both failures

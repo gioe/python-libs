@@ -5,8 +5,8 @@ from unittest import mock
 
 import pytest
 
-from libs.observability.config import ObservabilityConfig, OTELConfig, SentryConfig
-from libs.observability.facade import ObservabilityFacade, SpanContext
+from observability.config import ObservabilityConfig, OTELConfig, SentryConfig
+from observability.facade import ObservabilityFacade, SpanContext
 
 
 class TestObservabilityFacadeInit:
@@ -21,7 +21,7 @@ class TestObservabilityFacadeInit:
         """Test init() sets initialized flag."""
         facade = ObservabilityFacade()
         # Patch at the config module since that's where load_config is defined
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),
                 otel=OTELConfig(enabled=False),
@@ -34,7 +34,7 @@ class TestObservabilityFacadeInit:
     def test_init_with_disabled_backends(self) -> None:
         """Test init() with both backends disabled."""
         facade = ObservabilityFacade()
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),
                 otel=OTELConfig(enabled=False),
@@ -48,7 +48,7 @@ class TestObservabilityFacadeInit:
     def test_init_is_idempotent(self) -> None:
         """Test init() is idempotent - calling twice doesn't reinitialize."""
         facade = ObservabilityFacade()
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),
                 otel=OTELConfig(enabled=False),
@@ -69,7 +69,7 @@ class TestObservabilityFacadeInit:
     def test_init_registers_atexit_handler(self) -> None:
         """Test init() registers an atexit handler for shutdown."""
         facade = ObservabilityFacade()
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),
                 otel=OTELConfig(enabled=False),
@@ -84,7 +84,7 @@ class TestObservabilityFacadeInit:
     def test_init_registers_atexit_only_once(self) -> None:
         """Test atexit handler is only registered once even after shutdown and reinit."""
         facade = ObservabilityFacade()
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),
                 otel=OTELConfig(enabled=False),
@@ -104,10 +104,10 @@ class TestObservabilityFacadeInit:
 
     def test_init_returns_false_on_config_error(self) -> None:
         """Test init() returns False when configuration fails."""
-        from libs.observability.config import ConfigurationError
+        from observability.config import ConfigurationError
 
         facade = ObservabilityFacade()
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_load.side_effect = ConfigurationError("Invalid configuration")
 
             with mock.patch("atexit.register"):
@@ -118,14 +118,14 @@ class TestObservabilityFacadeInit:
     def test_init_handles_sentry_backend_init_failure(self) -> None:
         """Test init() continues if Sentry backend init fails."""
         facade = ObservabilityFacade()
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=True, dsn="https://test@sentry.io/123"),
                 otel=OTELConfig(enabled=False),
             )
             mock_load.return_value = mock_config
 
-            with mock.patch("libs.observability.sentry_backend.SentryBackend") as mock_sentry:
+            with mock.patch("observability.sentry_backend.SentryBackend") as mock_sentry:
                 mock_sentry.side_effect = RuntimeError("Sentry init failed")
 
                 with mock.patch("atexit.register"):
@@ -137,14 +137,14 @@ class TestObservabilityFacadeInit:
     def test_init_handles_otel_backend_init_failure(self) -> None:
         """Test init() continues if OTEL backend init fails."""
         facade = ObservabilityFacade()
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),
                 otel=OTELConfig(enabled=True, service_name="test"),
             )
             mock_load.return_value = mock_config
 
-            with mock.patch("libs.observability.otel_backend.OTELBackend") as mock_otel:
+            with mock.patch("observability.otel_backend.OTELBackend") as mock_otel:
                 mock_otel.side_effect = RuntimeError("OTEL init failed")
 
                 with mock.patch("atexit.register"):
@@ -932,7 +932,7 @@ class TestFacadeCaptureMethods:
         facade._sentry_backend = None  # Sentry disabled
 
         exc = ValueError("test error")
-        with mock.patch("libs.observability.facade.logger") as mock_logger:
+        with mock.patch("observability.facade.logger") as mock_logger:
             result = facade.capture_error(exc)
 
         assert result is None
@@ -948,7 +948,7 @@ class TestFacadeCaptureMethods:
         facade._sentry_backend.capture_error.side_effect = RuntimeError("SDK failure")
 
         exc = ValueError("test error")
-        with mock.patch("libs.observability.facade.logger") as mock_logger:
+        with mock.patch("observability.facade.logger") as mock_logger:
             result = facade.capture_error(exc)
 
         assert result is None
@@ -1503,21 +1503,21 @@ class TestAPIContract:
 
     def test_module_exports_singleton(self) -> None:
         """Test the module exports a singleton observability instance."""
-        from libs.observability import observability
+        from observability import observability
 
         assert isinstance(observability, ObservabilityFacade)
 
     def test_module_exports_facade_class(self) -> None:
         """Test the module exports the ObservabilityFacade class."""
-        from libs.observability import ObservabilityFacade as ExportedFacade
+        from observability import ObservabilityFacade as ExportedFacade
 
         assert ExportedFacade is ObservabilityFacade
 
     def test_init_accepts_required_parameters(self) -> None:
         """Test init() accepts the documented parameters."""
         facade = ObservabilityFacade()
-        with mock.patch("libs.observability.config.load_config") as mock_load:
-            from libs.observability.config import ObservabilityConfig, OTELConfig, SentryConfig
+        with mock.patch("observability.config.load_config") as mock_load:
+            from observability.config import ObservabilityConfig, OTELConfig, SentryConfig
 
             mock_load.return_value = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),

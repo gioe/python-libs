@@ -10,13 +10,13 @@ from unittest import mock
 
 import pytest
 
-from libs.observability.config import (
+from observability.config import (
     ObservabilityConfig,
     OTELConfig,
     RoutingConfig,
     SentryConfig,
 )
-from libs.observability.facade import ObservabilityFacade, SpanContext
+from observability.facade import ObservabilityFacade, SpanContext
 
 
 class TestFullInitialization:
@@ -26,7 +26,7 @@ class TestFullInitialization:
         """Test facade initializes both Sentry and OTEL backends."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=True, dsn="https://test@sentry.io/123"),
                 otel=OTELConfig(enabled=True, service_name="test-service"),
@@ -35,9 +35,9 @@ class TestFullInitialization:
             mock_load.return_value = mock_config
 
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend"
+                "observability.sentry_backend.SentryBackend"
             ) as mock_sentry_cls, mock.patch(
-                "libs.observability.otel_backend.OTELBackend"
+                "observability.otel_backend.OTELBackend"
             ) as mock_otel_cls, mock.patch(
                 "atexit.register"
             ):
@@ -60,7 +60,7 @@ class TestFullInitialization:
         """Test init logs summary of initialized backends."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=True, dsn="https://test@sentry.io/123"),
                 otel=OTELConfig(enabled=True, service_name="test-service"),
@@ -68,13 +68,13 @@ class TestFullInitialization:
             mock_load.return_value = mock_config
 
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend"
+                "observability.sentry_backend.SentryBackend"
             ) as mock_sentry_cls, mock.patch(
-                "libs.observability.otel_backend.OTELBackend"
+                "observability.otel_backend.OTELBackend"
             ) as mock_otel_cls, mock.patch(
                 "atexit.register"
             ), mock.patch(
-                "libs.observability.facade.logger"
+                "observability.facade.logger"
             ) as mock_logger:
                 mock_sentry = mock.MagicMock()
                 mock_sentry.init.return_value = True

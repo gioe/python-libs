@@ -18,8 +18,8 @@ from unittest import mock
 
 import pytest
 
-from libs.observability.config import ObservabilityConfig, OTELConfig, RoutingConfig, SentryConfig
-from libs.observability.facade import ObservabilityFacade, SpanContext
+from observability.config import ObservabilityConfig, OTELConfig, RoutingConfig, SentryConfig
+from observability.facade import ObservabilityFacade, SpanContext
 
 # Configurable timeout for concurrent tests - allows increasing for slow CI environments
 THREAD_TIMEOUT = float(os.getenv("TEST_THREAD_TIMEOUT", "30.0"))
@@ -658,7 +658,7 @@ class TestInitializationErrorHandling:
         """Test init handles configuration loading errors gracefully."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_load.side_effect = RuntimeError("Config file corrupted")
 
             with caplog.at_level(logging.ERROR):
@@ -673,7 +673,7 @@ class TestInitializationErrorHandling:
         """Test init handles Sentry backend initialization failure."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=True, dsn="https://test@sentry.io/123"),
                 otel=OTELConfig(enabled=False),
@@ -681,7 +681,7 @@ class TestInitializationErrorHandling:
             mock_load.return_value = mock_config
 
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend"
+                "observability.sentry_backend.SentryBackend"
             ) as mock_cls:
                 mock_cls.side_effect = RuntimeError("Sentry SDK import failed")
 
@@ -698,14 +698,14 @@ class TestInitializationErrorHandling:
         """Test init handles OTEL backend initialization failure."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=False),
                 otel=OTELConfig(enabled=True, service_name="test"),
             )
             mock_load.return_value = mock_config
 
-            with mock.patch("libs.observability.otel_backend.OTELBackend") as mock_cls:
+            with mock.patch("observability.otel_backend.OTELBackend") as mock_cls:
                 mock_cls.side_effect = RuntimeError("OTEL SDK import failed")
 
                 with caplog.at_level(logging.ERROR), mock.patch("atexit.register"):
@@ -721,7 +721,7 @@ class TestInitializationErrorHandling:
         """Test init handles both backends failing during initialization."""
         facade = ObservabilityFacade()
 
-        with mock.patch("libs.observability.config.load_config") as mock_load:
+        with mock.patch("observability.config.load_config") as mock_load:
             mock_config = ObservabilityConfig(
                 sentry=SentryConfig(enabled=True, dsn="https://test@sentry.io/123"),
                 otel=OTELConfig(enabled=True, service_name="test"),
@@ -729,9 +729,9 @@ class TestInitializationErrorHandling:
             mock_load.return_value = mock_config
 
             with mock.patch(
-                "libs.observability.sentry_backend.SentryBackend"
+                "observability.sentry_backend.SentryBackend"
             ) as mock_sentry, mock.patch(
-                "libs.observability.otel_backend.OTELBackend"
+                "observability.otel_backend.OTELBackend"
             ) as mock_otel:
                 mock_sentry.side_effect = RuntimeError("Sentry failed")
                 mock_otel.side_effect = RuntimeError("OTEL failed")

@@ -6,14 +6,14 @@ from unittest import mock
 
 import pytest
 
-from libs.observability.config import OTELConfig, SentryConfig
-from libs.observability.otel_backend import (
+from observability.config import OTELConfig, SentryConfig
+from observability.otel_backend import (
     OTELBackend,
     _parse_otlp_headers,
     _validate_metric_name,
     _check_label_cardinality,
 )
-from libs.observability.sentry_backend import SentryBackend
+from observability.sentry_backend import SentryBackend
 
 # Check if sentry_sdk is available
 try:
@@ -184,7 +184,7 @@ class TestSentryBackendInit:
         )
         backend = SentryBackend(config)
 
-        with mock.patch("libs.observability.sentry_backend.logger") as mock_logger:
+        with mock.patch("observability.sentry_backend.logger") as mock_logger:
             backend.init()
             mock_logger.info.assert_called_once()
             log_message = mock_logger.info.call_args[0][0]
@@ -199,7 +199,7 @@ class TestSentryBackendInit:
         config = SentryConfig(enabled=True, dsn="https://test@sentry.io/123")
         backend = SentryBackend(config)
 
-        with mock.patch("libs.observability.sentry_backend.logger") as mock_logger:
+        with mock.patch("observability.sentry_backend.logger") as mock_logger:
             result = backend.init()
 
             assert result is False
@@ -211,7 +211,7 @@ class TestSentryBackendInit:
         config = SentryConfig(enabled=False, dsn="https://test@sentry.io/123")
         backend = SentryBackend(config)
 
-        with mock.patch("libs.observability.sentry_backend.logger") as mock_logger:
+        with mock.patch("observability.sentry_backend.logger") as mock_logger:
             backend.init()
             mock_logger.debug.assert_called_once()
 
@@ -707,7 +707,7 @@ class TestOTELBackendLifecycle:
         backend._meter_provider.force_flush.side_effect = RuntimeError("flush failed")
 
         # Should not raise, should log warning
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.flush()
             mock_logger.warning.assert_called()
 
@@ -720,7 +720,7 @@ class TestOTELBackendLifecycle:
         backend._meter_provider.shutdown.side_effect = RuntimeError("shutdown failed")
 
         # Should not raise, should log warning
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.shutdown()
             mock_logger.warning.assert_called()
 
@@ -730,7 +730,7 @@ class TestContextSerialization:
 
     def test_serialize_value_primitives(self) -> None:
         """Test serialization of primitive types."""
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         assert _serialize_value(None) is None
         assert _serialize_value(True) is True
@@ -742,7 +742,7 @@ class TestContextSerialization:
         """Test serialization of datetime objects."""
         from datetime import date, datetime
 
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         dt = datetime(2024, 1, 15, 10, 30, 0)
         assert _serialize_value(dt) == "2024-01-15T10:30:00"
@@ -754,14 +754,14 @@ class TestContextSerialization:
         """Test serialization of UUID objects."""
         from uuid import UUID
 
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         uuid = UUID("12345678-1234-5678-1234-567812345678")
         assert _serialize_value(uuid) == "12345678-1234-5678-1234-567812345678"
 
     def test_serialize_value_bytes(self) -> None:
         """Test serialization of bytes."""
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         # UTF-8 decodable bytes
         assert _serialize_value(b"hello") == "hello"
@@ -775,7 +775,7 @@ class TestContextSerialization:
         from datetime import datetime
         from uuid import UUID
 
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         nested = {
             "user_id": UUID("12345678-1234-5678-1234-567812345678"),
@@ -794,7 +794,7 @@ class TestContextSerialization:
         """Test serialization of lists."""
         from uuid import UUID
 
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         items = [UUID("12345678-1234-5678-1234-567812345678"), "hello", 42]
         result = _serialize_value(items)
@@ -803,7 +803,7 @@ class TestContextSerialization:
 
     def test_serialize_value_set(self) -> None:
         """Test serialization of sets (converted to sorted list)."""
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         items = {3, 1, 2}
         result = _serialize_value(items)
@@ -812,7 +812,7 @@ class TestContextSerialization:
 
     def test_serialize_value_custom_object(self) -> None:
         """Test serialization of custom objects with __dict__."""
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         class CustomObj:
             def __init__(self) -> None:
@@ -831,7 +831,7 @@ class TestContextSerialization:
         from datetime import datetime
         from uuid import UUID
 
-        from libs.observability.sentry_backend import _serialize_context
+        from observability.sentry_backend import _serialize_context
 
         context = {
             "request_id": UUID("12345678-1234-5678-1234-567812345678"),
@@ -850,7 +850,7 @@ class TestContextSerialization:
 
     def test_serialize_value_circular_reference_dict(self) -> None:
         """Test serialization handles circular reference in dict."""
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         d: dict[str, Any] = {"name": "test"}
         d["self"] = d  # Create circular reference
@@ -862,7 +862,7 @@ class TestContextSerialization:
 
     def test_serialize_value_circular_reference_list(self) -> None:
         """Test serialization handles circular reference in list."""
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         lst: list[Any] = [1, 2, 3]
         lst.append(lst)  # Create circular reference
@@ -876,7 +876,7 @@ class TestContextSerialization:
 
     def test_serialize_value_indirect_circular_reference(self) -> None:
         """Test serialization handles indirect circular references."""
-        from libs.observability.sentry_backend import _serialize_value
+        from observability.sentry_backend import _serialize_value
 
         a: dict[str, Any] = {"name": "a"}
         b: dict[str, Any] = {"name": "b"}
@@ -1174,7 +1174,7 @@ class TestOTELBackendInitReturnValue:
         backend = OTELBackend(config)
         backend._initialized = True
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             result = backend.init()
             assert result is True
             mock_logger.warning.assert_called_once()
@@ -1383,57 +1383,57 @@ class TestLabelCardinalityValidation:
 
     def test_no_warning_for_normal_labels(self) -> None:
         """Test no warning for normal low-cardinality labels."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"endpoint": "/api", "method": "GET"}, "requests")
             mock_logger.warning.assert_not_called()
 
     def test_warns_on_user_id(self) -> None:
         """Test warning on user_id label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"user_id": "12345"}, "requests")
             mock_logger.warning.assert_called_once()
             assert "user_id" in mock_logger.warning.call_args[0][0]
 
     def test_warns_on_userid_variant(self) -> None:
         """Test warning on userid label (no underscore)."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"userid": "12345"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_request_id(self) -> None:
         """Test warning on request_id label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"request_id": "abc-123"}, "requests")
             mock_logger.warning.assert_called_once()
             assert "request_id" in mock_logger.warning.call_args[0][0]
 
     def test_warns_on_session_id(self) -> None:
         """Test warning on session_id label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"session_id": "sess-xyz"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_timestamp(self) -> None:
         """Test warning on timestamp label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"timestamp": "2024-01-15T10:30:00"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_email(self) -> None:
         """Test warning on email label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"email": "user@example.com"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_warns_on_ip_address(self) -> None:
         """Test warning on ip_address label."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality({"ip_address": "192.168.1.1"}, "requests")
             mock_logger.warning.assert_called_once()
 
     def test_none_labels_no_error(self) -> None:
         """Test no error when labels is None."""
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             _check_label_cardinality(None, "requests")
             mock_logger.warning.assert_not_called()
 
@@ -1527,7 +1527,7 @@ class TestRecordMetricValidation:
         mock_counter = mock.MagicMock()
         backend._meter.create_counter.return_value = mock_counter
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.record_metric("Invalid Metric Name", 1, metric_type="counter")
 
             # Should log warning about invalid name
@@ -1547,7 +1547,7 @@ class TestRecordMetricValidation:
         mock_counter = mock.MagicMock()
         backend._meter.create_counter.return_value = mock_counter
 
-        with mock.patch("libs.observability.otel_backend.logger") as mock_logger:
+        with mock.patch("observability.otel_backend.logger") as mock_logger:
             backend.record_metric(
                 "requests",
                 1,

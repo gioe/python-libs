@@ -2,7 +2,7 @@
 
 import pytest
 
-from libs.observability.validation import (
+from observability.validation import (
     MAX_TAG_LENGTH,
     validate_json_serializable,
     validate_tag,

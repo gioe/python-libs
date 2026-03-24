@@ -21,8 +21,8 @@ from uuid import UUID
 
 import pytest
 
-from libs.observability.config import SentryConfig
-from libs.observability.sentry_backend import (
+from observability.config import SentryConfig
+from observability.sentry_backend import (
     SentryBackend,
     _serialize_context,
     _serialize_value,
@@ -537,7 +537,7 @@ class TestIntegrationImportFailures:
         # Force reimport to trigger ImportError
         import importlib
 
-        import libs.observability.sentry_backend as sb
+        import observability.sentry_backend as sb
 
         importlib.reload(sb)
 
@@ -556,7 +556,7 @@ class TestIntegrationImportFailures:
         # Force reimport to trigger ImportError
         import importlib
 
-        import libs.observability.sentry_backend as sb
+        import observability.sentry_backend as sb
 
         importlib.reload(sb)
 
