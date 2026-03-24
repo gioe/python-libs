@@ -1146,9 +1146,24 @@ class ResourceMonitor:
 
     def check_and_alert(self) -> ResourceMonitorResult:
         """Invoke check_fn and send alerts for resources below thresholds."""
-        resources = self.check_fn()
+        try:
+            resources = self.check_fn()
+        except Exception as exc:
+            logger.error(f"ResourceMonitor check_fn raised an exception: {exc}", exc_info=True)
+            return ResourceMonitorResult()
         result = ResourceMonitorResult(resources_checked=len(resources))
         now = datetime.now(timezone.utc)
+
+        # Warn about duplicate names — cooldown tracking is keyed on name, so
+        # duplicates cause last-write-wins suppression that can mask alert bugs.
+        seen_names: set = set()
+        for resource in resources:
+            if resource.name in seen_names:
+                logger.warning(
+                    f"ResourceMonitor: duplicate resource name {resource.name!r} "
+                    "returned by check_fn — cooldown tracking requires unique names."
+                )
+            seen_names.add(resource.name)
 
         self._cleanup_old_cooldowns(now)
 
@@ -1314,6 +1329,9 @@ class ResourceMonitor:
         self, resources: List[ResourceStatus], threshold: int
     ) -> str:
         """Build context string with affected resource details."""
+        if not self.config.include_affected_resources:
+            return ""
+
         lines = ["Affected resources:"]
 
         sorted_resources = sorted(resources, key=lambda r: r.count)

@@ -507,3 +507,20 @@ class TestResourceContext:
 
         assert am.send_alert.call_count == 1
         assert result.alerts_suppressed >= 1
+
+    def test_check_fn_exception_returns_empty_result(self):
+        """If check_fn raises, check_and_alert returns an empty result without propagating."""
+        am = AlertManager()
+        am.send_alert = MagicMock(return_value=True)
+
+        def raising_check_fn():
+            raise RuntimeError("db timeout")
+
+        monitor = ResourceMonitor(
+            check_fn=raising_check_fn, alert_manager=am, config=AlertingConfig()
+        )
+        result = monitor.check_and_alert()
+
+        assert result.resources_checked == 0
+        assert result.alerts_sent == 0
+        am.send_alert.assert_not_called()
