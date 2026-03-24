@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from alerting.alerting import (
+    AlertError,
     AlertManager,
     AlertingConfig,
     ErrorCategory,
@@ -267,3 +268,160 @@ class TestCreateHtmlAlert:
         assert "<evil>" not in html_body
         assert "&lt;evil&gt;" in html_body
         assert "&lt;img" in html_body
+
+
+# ---------------------------------------------------------------------------
+# service_name — interpolation in email templates
+# ---------------------------------------------------------------------------
+
+
+class TestServiceName:
+    def test_alert_manager_default_service_name(self):
+        mgr = AlertManager()
+        assert mgr.service_name == "Alerting Service"
+
+    def test_alert_manager_custom_service_name(self):
+        mgr = AlertManager(service_name="My App")
+        assert mgr.service_name == "My App"
+
+    def test_email_subject_uses_service_name(self):
+        mgr = AlertManager(service_name="My App")
+        err = MagicMock()
+        err.severity = ErrorSeverity.CRITICAL
+        err.category = ErrorCategory.BILLING_QUOTA
+        err.provider = "openai"
+        subject = mgr._get_email_subject(err)
+        assert "My App" in subject
+        assert "IQ Tracker" not in subject
+        assert "AIQ" not in subject
+
+    def test_html_footer_uses_service_name(self):
+        mgr = AlertManager(service_name="Acme Alerts")
+        err = MagicMock()
+        err.message = "test"
+        err.provider = "openai"
+        err.category = ErrorCategory.BILLING_QUOTA
+        err.severity = ErrorSeverity.HIGH
+        err.original_error = "err"
+        html_body = mgr._create_html_alert(err, "Test. Recommended Actions: check logs")
+        assert "Acme Alerts" in html_body
+        assert "IQ Tracker" not in html_body
+
+    def test_alerting_config_default_service_name(self):
+        config = AlertingConfig()
+        assert config.service_name == "Alerting Service"
+        assert "Alerting Service" in config.subject_prefix_warning
+        assert "Alerting Service" in config.subject_prefix_critical
+
+    def test_alerting_config_custom_service_name_sets_subject_prefixes(self):
+        config = AlertingConfig(service_name="MyService")
+        assert "MyService" in config.subject_prefix_warning
+        assert "MyService" in config.subject_prefix_critical
+
+    def test_alerting_config_explicit_prefix_not_overridden(self):
+        config = AlertingConfig(
+            service_name="MyService",
+            subject_prefix_warning="[CUSTOM] Warning",
+        )
+        assert config.subject_prefix_warning == "[CUSTOM] Warning"
+
+    def test_alerting_config_from_yaml_loads_service_name(self):
+        import tempfile, yaml, os
+        data = {"service_name": "YAML Service"}
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False
+        ) as f:
+            yaml.dump(data, f)
+            tmp_path = f.name
+        try:
+            config = AlertingConfig.from_yaml(tmp_path)
+            assert config.service_name == "YAML Service"
+            assert "YAML Service" in config.subject_prefix_warning
+        finally:
+            os.unlink(tmp_path)
+
+    def test_inventory_alert_manager_syncs_service_name_to_alert_manager(self):
+        am = AlertManager()  # default service_name = "Alerting Service"
+        config = AlertingConfig(service_name="Synced Service")
+        InventoryAlertManager(alert_manager=am, config=config)
+        assert am.service_name == "Synced Service"
+
+
+# ---------------------------------------------------------------------------
+# recommended_actions — rendering and serialization
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendedActions:
+    def _make_alert_error(self, recommended_actions=None):
+        kwargs = dict(
+            category=ErrorCategory.BILLING_QUOTA,
+            severity=ErrorSeverity.HIGH,
+            provider="openai",
+            original_error="QuotaExceeded",
+            message="Out of credits",
+        )
+        if recommended_actions is not None:
+            kwargs["recommended_actions"] = recommended_actions
+        return AlertError(**kwargs)
+
+    def test_recommended_actions_default_is_empty_list(self):
+        err = self._make_alert_error()
+        assert err.recommended_actions == []
+
+    def test_recommended_actions_rendered_in_alert_message(self):
+        err = self._make_alert_error(recommended_actions=["Do thing A", "Do thing B"])
+        mgr = AlertManager()
+        msg = mgr._build_alert_message(err)
+        assert "Do thing A" in msg
+        assert "Do thing B" in msg
+
+    def test_empty_recommended_actions_falls_back_to_category_defaults(self):
+        err = self._make_alert_error(recommended_actions=[])
+        mgr = AlertManager()
+        msg = mgr._build_alert_message(err)
+        # Category default for BILLING_QUOTA references "account balance"
+        assert "account balance" in msg
+
+    def test_recommended_actions_included_in_to_dict_when_present(self):
+        err = self._make_alert_error(recommended_actions=["Step 1", "Step 2"])
+        d = err.to_dict()
+        assert "recommended_actions" in d
+        assert d["recommended_actions"] == ["Step 1", "Step 2"]
+
+    def test_recommended_actions_omitted_from_to_dict_when_empty(self):
+        err = self._make_alert_error(recommended_actions=[])
+        d = err.to_dict()
+        assert "recommended_actions" not in d
+
+
+# ---------------------------------------------------------------------------
+# _build_inventory_context — no duplicate Recommended Actions section
+# ---------------------------------------------------------------------------
+
+
+class TestInventoryContext:
+    def test_no_duplicate_recommended_actions_section(self):
+        """Recommended Actions must appear exactly once in the full alert message."""
+        import tempfile, os
+        config = AlertingConfig(
+            service_name="TestSvc",
+            include_recommendations=True,
+            inventory_alert_file=os.path.join(tempfile.mkdtemp(), "alerts.log"),
+        )
+        am = AlertManager()
+        inv_mgr = InventoryAlertManager(alert_manager=am, config=config)
+
+        strata = [
+            StratumAlert(
+                question_type="math",
+                difficulty="easy",
+                current_count=2,
+                threshold=5,
+                severity=ErrorSeverity.CRITICAL,
+            )
+        ]
+        alert_error = inv_mgr._build_inventory_error(strata, ErrorSeverity.CRITICAL)
+        context = inv_mgr._build_inventory_context(strata)
+        msg = am._build_alert_message(alert_error, context)
+        assert msg.count("Recommended Actions:") == 1

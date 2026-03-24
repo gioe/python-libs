@@ -125,6 +125,8 @@ class AlertError:
         }
         if self.quota_details:
             result["quota_details"] = self.quota_details
+        if self.recommended_actions:
+            result["recommended_actions"] = self.recommended_actions
         return result
 
 
@@ -715,7 +717,7 @@ class AlertManager:
             lines.extend(["", "Note: This error requires manual intervention."])
 
         # Add action items: use caller-supplied actions if present, else category defaults
-        caller_actions = getattr(classified_error, "recommended_actions", None)
+        caller_actions = getattr(classified_error, "recommended_actions", [])
         lines.extend(["", "Recommended Actions:"])
 
         if caller_actions:
@@ -1006,9 +1008,15 @@ class AlertingConfig:
     # Service identification
     service_name: str = "Alerting Service"
 
-    # Email settings
-    subject_prefix_warning: str = "[Alerting Service] Inventory Warning"
-    subject_prefix_critical: str = "[Alerting Service] CRITICAL: Inventory Alert"
+    # Email settings — None means "derive from service_name" (resolved in __post_init__)
+    subject_prefix_warning: Optional[str] = None
+    subject_prefix_critical: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.subject_prefix_warning is None:
+            self.subject_prefix_warning = f"[{self.service_name}] Inventory Warning"
+        if self.subject_prefix_critical is None:
+            self.subject_prefix_critical = f"[{self.service_name}] CRITICAL: Inventory Alert"
 
     # File logging
     inventory_alert_file: str = "./logs/inventory_alerts.log"
@@ -1071,14 +1079,8 @@ class AlertingConfig:
             include_affected_strata=content.get("include_affected_strata", True),
             max_strata_detail=content.get("max_strata_detail", 5),
             include_recommendations=content.get("include_recommendations", True),
-            subject_prefix_warning=email.get(
-                "subject_prefix_warning",
-                f"[{service_name}] Inventory Warning",
-            ),
-            subject_prefix_critical=email.get(
-                "subject_prefix_critical",
-                f"[{service_name}] CRITICAL: Inventory Alert",
-            ),
+            subject_prefix_warning=email.get("subject_prefix_warning") or None,
+            subject_prefix_critical=email.get("subject_prefix_critical") or None,
             inventory_alert_file=file_logging.get(
                 "inventory_alert_file", "./logs/inventory_alerts.log"
             ),
@@ -1135,6 +1137,8 @@ class InventoryAlertManager:
         """Initialize inventory alert manager."""
         self.alert_manager = alert_manager
         self.config = config or AlertingConfig()
+        # Propagate service_name from config so all alert templates are consistent
+        self.alert_manager.service_name = self.config.service_name
 
         self._stratum_last_alert: Dict[Tuple[str, str], datetime] = {}
         self._global_last_alert: Optional[datetime] = None
@@ -1337,6 +1341,14 @@ class InventoryAlertManager:
             f"Question generation may be needed to replenish inventory."
         )
 
+        recommended_actions: List[str] = []
+        if self.config.include_recommendations:
+            recommended_actions = [
+                "Review generation logs for any failures",
+                "Check LLM provider API quotas and billing",
+                "Review application logs for more context",
+            ]
+
         return AlertError(
             category=ErrorCategory.INVENTORY_LOW,
             severity=severity,
@@ -1344,6 +1356,7 @@ class InventoryAlertManager:
             original_error="LowInventory",
             message=message,
             is_retryable=True,
+            recommended_actions=recommended_actions,
         )
 
     def _build_inventory_context(self, strata: List[StratumAlert]) -> str:
@@ -1361,17 +1374,6 @@ class InventoryAlertManager:
         remaining = len(strata) - self.config.max_strata_detail
         if remaining > 0:
             lines.append(f"  ... and {remaining} more strata")
-
-        if self.config.include_recommendations:
-            lines.extend(
-                [
-                    "",
-                    "Recommended Actions:",
-                    "1. Review generation logs for any failures",
-                    "2. Check LLM provider API quotas and billing",
-                    "3. Review application logs for more context",
-                ]
-            )
 
         return "\n".join(lines)
 
