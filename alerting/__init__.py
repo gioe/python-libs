@@ -1,6 +1,6 @@
 # Shared alerting library for AIQ services
 
-from alerting.alerting import (
+from .alerting import (
     ResourceMonitor,
     ResourceStatus,
     ResourceMonitorResult,
