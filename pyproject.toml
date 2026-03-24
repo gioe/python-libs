@@ -26,7 +26,7 @@ packages = [
     "gioe_libs.alerting",
     "gioe_libs.cron_runner",
     "gioe_libs.domain_types",
-    "gioe_libs.aiq_logging",
+    "gioe_libs.structured_logging",
     "gioe_libs.observability",
 ]
 
