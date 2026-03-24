@@ -3,7 +3,7 @@
 This module provides functionality to send alerts via email and other channels
 when critical errors occur in a pipeline, including low inventory alerts.
 
-This module has no dependencies on any AIQ service package — it can be
+This module has no service-specific dependencies — it can be
 imported by any service that sets PYTHONPATH to include the repo root.
 """
 
@@ -110,6 +110,7 @@ class AlertError:
     is_retryable: bool = False
     status_code: Optional[int] = None
     quota_details: Optional[Dict[str, Any]] = None
+    recommended_actions: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a dict representation of the error."""
@@ -167,6 +168,7 @@ class AlertManager:
         to_emails: Optional[List[str]] = None,
         alert_file_path: Optional[str] = None,
         discord_webhook_url: Optional[str] = None,
+        service_name: str = "Alerting Service",
     ):
         """Initialize alert manager.
 
@@ -180,6 +182,7 @@ class AlertManager:
             to_emails: List of recipient email addresses
             alert_file_path: Path to file for logging critical alerts
             discord_webhook_url: Discord webhook URL for circuit breaker / quota alerts
+            service_name: Name of the service shown in alert templates
         """
         self.email_enabled = email_enabled
         self.smtp_host = smtp_host
@@ -190,6 +193,7 @@ class AlertManager:
         self.to_emails = to_emails or []
         self.alert_file_path = alert_file_path
         self.discord_webhook_url = discord_webhook_url
+        self.service_name = service_name
 
         # Track last Discord alert time per provider for cooldown enforcement
         self._discord_cooldowns: Dict[str, float] = {}
@@ -710,10 +714,14 @@ class AlertManager:
         else:
             lines.extend(["", "Note: This error requires manual intervention."])
 
-        # Add action items based on category
+        # Add action items: use caller-supplied actions if present, else category defaults
+        caller_actions = getattr(classified_error, "recommended_actions", None)
         lines.extend(["", "Recommended Actions:"])
 
-        if category_val == ErrorCategory.BILLING_QUOTA:
+        if caller_actions:
+            for i, action in enumerate(caller_actions, start=1):
+                lines.append(f"{i}. {action}")
+        elif category_val == ErrorCategory.BILLING_QUOTA:
             lines.extend(
                 [
                     f"1. Check your {classified_error.provider} account balance",
@@ -742,26 +750,18 @@ class AlertManager:
         elif category_val == ErrorCategory.INVENTORY_LOW:
             lines.extend(
                 [
-                    "1. Run question generation with --auto-balance flag",
-                    "2. Review generation logs for recent failures",
-                    "3. Check LLM provider API quotas and billing",
-                    "4. Consider increasing questions_per_run in config",
-                    "5. Monitor /v1/admin/inventory-health endpoint",
+                    "1. Review generation logs for recent failures",
+                    "2. Check LLM provider API quotas and billing",
+                    "3. Review application logs for more context",
                 ]
             )
         elif category_val == ErrorCategory.SCRIPT_FAILURE:
-            # NOTE: These recommended actions are intentionally duplicated in
-            # scripts/send_script_alert.py (build_alert_message function).
-            # That script is standalone to avoid importing this module (which requires
-            # API keys and other config). If updating these actions, also update
-            # the corresponding section in send_script_alert.py.
             lines.extend(
                 [
-                    "1. Check bootstrap script logs for detailed error messages",
+                    "1. Check script logs for detailed error messages",
                     "2. Review LLM provider status pages for outages",
                     "3. Verify API keys are valid and have sufficient quota",
                     "4. Check network connectivity to LLM providers",
-                    "5. Re-run failed types individually: ./scripts/bootstrap_inventory.sh --types <type>",
                 ]
             )
         else:
@@ -823,7 +823,7 @@ class AlertManager:
         emoji = "🚨" if severity_val == ErrorSeverity.CRITICAL else "⚠️"
 
         return (
-            f"{emoji} IQ Tracker Alert: {category_val.title()} "
+            f"{emoji} {self.service_name} Alert: {category_val.title()} "
             f"({classified_error.provider})"
         )
 
@@ -917,7 +917,7 @@ class AlertManager:
             </div>
 
             <div class="footer">
-                <p>This is an automated alert from the IQ Tracker Question Generation Service.</p>
+                <p>This is an automated alert from {html_module.escape(self.service_name)}.</p>
                 <p>Original error: {html_module.escape(str(original_error))}</p>
             </div>
         </body>
@@ -1003,9 +1003,12 @@ class AlertingConfig:
     max_strata_detail: int = 5
     include_recommendations: bool = True
 
+    # Service identification
+    service_name: str = "Alerting Service"
+
     # Email settings
-    subject_prefix_warning: str = "[AIQ] Inventory Warning"
-    subject_prefix_critical: str = "[AIQ] CRITICAL: Inventory Alert"
+    subject_prefix_warning: str = "[Alerting Service] Inventory Warning"
+    subject_prefix_critical: str = "[Alerting Service] CRITICAL: Inventory Alert"
 
     # File logging
     inventory_alert_file: str = "./logs/inventory_alerts.log"
@@ -1037,6 +1040,7 @@ class AlertingConfig:
             logger.warning("Empty alerting config, using defaults")
             return cls()
 
+        service_name = data.get("service_name", "Alerting Service")
         inventory = data.get("inventory", {})
         thresholds = inventory.get("thresholds", {})
         cooldown = inventory.get("cooldown", {})
@@ -1057,6 +1061,7 @@ class AlertingConfig:
             healthy, warning, critical = 50, 20, 5
 
         return cls(
+            service_name=service_name,
             healthy_min=healthy,
             warning_min=warning,
             critical_min=critical,
@@ -1067,10 +1072,12 @@ class AlertingConfig:
             max_strata_detail=content.get("max_strata_detail", 5),
             include_recommendations=content.get("include_recommendations", True),
             subject_prefix_warning=email.get(
-                "subject_prefix_warning", "[AIQ] Inventory Warning"
+                "subject_prefix_warning",
+                f"[{service_name}] Inventory Warning",
             ),
             subject_prefix_critical=email.get(
-                "subject_prefix_critical", "[AIQ] CRITICAL: Inventory Alert"
+                "subject_prefix_critical",
+                f"[{service_name}] CRITICAL: Inventory Alert",
             ),
             inventory_alert_file=file_logging.get(
                 "inventory_alert_file", "./logs/inventory_alerts.log"
@@ -1360,10 +1367,9 @@ class InventoryAlertManager:
                 [
                     "",
                     "Recommended Actions:",
-                    "1. Run question generation with --auto-balance flag",
-                    "2. Review generation logs for any failures",
-                    "3. Check LLM provider API quotas and billing",
-                    "4. Consider increasing questions_per_run in config",
+                    "1. Review generation logs for any failures",
+                    "2. Check LLM provider API quotas and billing",
+                    "3. Review application logs for more context",
                 ]
             )
 
