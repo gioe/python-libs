@@ -56,7 +56,7 @@ Routes error alerts via email/Slack with deduplication and rate-limiting. Suppor
 Thin wrapper (`CronJob`) that wires logging, observability, alerting, and heartbeat for scheduled jobs. Accepts a `work_fn` callback. Supports external schedulers (Railway, cron, EventBridge) or embedded scheduling via `timedelta`. Writes heartbeat JSON for uptime monitoring.
 
 ### `domain_types/` — Shared Domain Enums
-Generic, project-agnostic enums reusable across unrelated services: `DifficultyLevel`, `SessionStatus`, `GenerationRunStatus`, `EducationLevel`, `FeedbackCategory`, `FeedbackStatus`. No business logic. Application-specific enums (e.g. `QuestionType`, `TestStatus`, `NotificationType`) belong in the consuming application, not here.
+Generic, project-agnostic enums reusable across unrelated services: `DifficultyLevel`, `SessionStatus`, `AsyncRunStatus`, `FeedbackStatus`. No business logic. Application-specific enums (e.g. `QuestionType`, `TestStatus`, `NotificationType`, `EducationLevel`, `FeedbackCategory`) belong in the consuming application, not here.
 
 ## Key Patterns
 
