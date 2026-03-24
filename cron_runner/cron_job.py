@@ -1,6 +1,6 @@
 """CronJob harness: thin wrapper that wires cross-cutting concerns for scheduled work.
 
-This module has no dependencies on any AIQ service package — it can be
+This module has no dependencies on any external service package — it can be
 imported by any service that sets PYTHONPATH to include the repo root.
 """
 
