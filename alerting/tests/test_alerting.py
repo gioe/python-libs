@@ -396,6 +396,41 @@ class TestRecommendedActions:
 
 
 # ---------------------------------------------------------------------------
+# send_alert — Discord routing by severity
+# ---------------------------------------------------------------------------
+
+
+class TestSendAlertDiscordRouting:
+    def test_critical_severity_triggers_discord_alert(self):
+        """send_alert calls _send_critical_discord_alert when severity=CRITICAL."""
+        mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
+        mgr._send_critical_discord_alert = MagicMock(return_value=True)
+        err = AlertError(
+            category=ErrorCategory.SERVER_ERROR,
+            severity=ErrorSeverity.CRITICAL,
+            provider="openai",
+            original_error="500",
+            message="Internal server error",
+        )
+        mgr.send_alert(err)
+        mgr._send_critical_discord_alert.assert_called_once()
+
+    def test_non_critical_severity_does_not_trigger_discord_alert(self):
+        """send_alert does NOT call _send_critical_discord_alert for non-CRITICAL severity."""
+        mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
+        mgr._send_critical_discord_alert = MagicMock(return_value=True)
+        err = AlertError(
+            category=ErrorCategory.NETWORK_ERROR,
+            severity=ErrorSeverity.HIGH,
+            provider="openai",
+            original_error="timeout",
+            message="Connection timed out",
+        )
+        mgr.send_alert(err)
+        mgr._send_critical_discord_alert.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # _build_inventory_context — no duplicate Recommended Actions section
 # ---------------------------------------------------------------------------
 
