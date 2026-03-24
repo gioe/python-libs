@@ -20,7 +20,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 import yaml
 
@@ -138,6 +138,15 @@ class AlertError:
 # RunSummary is a plain dict.  Any keys may be present; CronJob converts
 # them to (label, value) tuples and passes them to send_notification().
 RunSummary = Dict[str, Any]
+
+
+@dataclass
+class ResourceStatus:
+    """Generic resource status returned by a ResourceMonitor check_fn callback."""
+
+    name: str
+    count: int
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class AlertManager:
@@ -958,21 +967,21 @@ TIMESTAMP: {timestamp}
 
 @dataclass
 class AlertingConfig:
-    """Configuration for inventory alerting loaded from YAML."""
+    """Configuration for resource alerting loaded from YAML."""
 
-    # Inventory thresholds
+    # Resource thresholds
     healthy_min: int = 50
     warning_min: int = 20
     critical_min: int = 5
 
     # Cooldown settings (in minutes)
-    per_stratum_cooldown_minutes: int = 60
+    per_resource_cooldown_minutes: int = 60
     global_cooldown_minutes: int = 15
     max_alerts_per_hour: int = 10
 
     # Content settings
-    include_affected_strata: bool = True
-    max_strata_detail: int = 5
+    include_affected_resources: bool = True
+    max_resource_detail: int = 5
     include_recommendations: bool = True
 
     # Service identification
@@ -984,12 +993,12 @@ class AlertingConfig:
 
     def __post_init__(self) -> None:
         if self.subject_prefix_warning is None:
-            self.subject_prefix_warning = f"[{self.service_name}] Inventory Warning"
+            self.subject_prefix_warning = f"[{self.service_name}] Resource Warning"
         if self.subject_prefix_critical is None:
-            self.subject_prefix_critical = f"[{self.service_name}] CRITICAL: Inventory Alert"
+            self.subject_prefix_critical = f"[{self.service_name}] CRITICAL: Resource Alert"
 
     # File logging
-    inventory_alert_file: str = "./logs/inventory_alerts.log"
+    resource_alert_file: str = "./logs/resource_alerts.log"
     log_all_checks: bool = False
 
     @classmethod
@@ -1019,10 +1028,10 @@ class AlertingConfig:
             return cls()
 
         service_name = data.get("service_name", "Alerting Service")
-        inventory = data.get("inventory", {})
-        thresholds = inventory.get("thresholds", {})
-        cooldown = inventory.get("cooldown", {})
-        content = inventory.get("content", {})
+        resources = data.get("resources", data.get("inventory", {}))
+        thresholds = resources.get("thresholds", {})
+        cooldown = resources.get("cooldown", {})
+        content = resources.get("content", {})
         email = data.get("email", {})
         file_logging = data.get("file_logging", {})
 
@@ -1043,54 +1052,41 @@ class AlertingConfig:
             healthy_min=healthy,
             warning_min=warning,
             critical_min=critical,
-            per_stratum_cooldown_minutes=cooldown.get("per_stratum_minutes", 60),
+            per_resource_cooldown_minutes=cooldown.get("per_resource_minutes", 60),
             global_cooldown_minutes=cooldown.get("global_minutes", 15),
             max_alerts_per_hour=cooldown.get("max_alerts_per_hour", 10),
-            include_affected_strata=content.get("include_affected_strata", True),
-            max_strata_detail=content.get("max_strata_detail", 5),
+            include_affected_resources=content.get("include_affected_resources", True),
+            max_resource_detail=content.get("max_resource_detail", 5),
             include_recommendations=content.get("include_recommendations", True),
             subject_prefix_warning=email.get("subject_prefix_warning") or None,
             subject_prefix_critical=email.get("subject_prefix_critical") or None,
-            inventory_alert_file=file_logging.get(
-                "inventory_alert_file", "./logs/inventory_alerts.log"
+            resource_alert_file=file_logging.get(
+                "resource_alert_file", "./logs/resource_alerts.log"
             ),
             log_all_checks=file_logging.get("log_all_checks", False),
         )
 
 
 @dataclass
-class StratumAlert:
-    """Alert information for a single stratum."""
+class ResourceMonitorResult:
+    """Result of a ResourceMonitor check."""
 
-    question_type: str
-    difficulty: str
-    current_count: int
-    threshold: int
-    severity: ErrorSeverity
-
-
-@dataclass
-class InventoryAlertResult:
-    """Result of an inventory alert check."""
-
-    # Number of strata that triggered alerts (not number of emails sent —
-    # all alertable strata are consolidated into one email per check).
+    # Number of resources that triggered alerts (not number of emails sent —
+    # all alertable resources are consolidated into one email per check).
     alerts_sent: int = 0
     alerts_suppressed: int = 0
-    strata_checked: int = 0
-    critical_strata: List[StratumAlert] = field(default_factory=list)
-    warning_strata: List[StratumAlert] = field(default_factory=list)
-    healthy_strata: int = 0
+    resources_checked: int = 0
+    critical_resources: List[ResourceStatus] = field(default_factory=list)
+    warning_resources: List[ResourceStatus] = field(default_factory=list)
+    healthy_resources: int = 0
 
 
-class InventoryAlertManager:
-    """Manages inventory-specific alerting with cooldown tracking.
+class ResourceMonitor:
+    """Monitors resources using a caller-supplied check_fn callback.
 
-    This class extends the base AlertManager with inventory-specific functionality:
-    - Threshold-based alerts (critical, warning, healthy)
-    - Per-stratum cooldowns to prevent alert spam
-    - Global cooldowns for overall alert rate limiting
-    - Actionable alert content with affected strata details
+    The client provides a ``check_fn: Callable[[], list[ResourceStatus]]``; the
+    library owns cooldown tracking, rate-limiting, threshold evaluation, and
+    channel routing.
 
     Note: This class is NOT thread-safe. It must only be called from a single
     thread. For concurrent access, use external synchronization.
@@ -1101,104 +1097,90 @@ class InventoryAlertManager:
 
     def __init__(
         self,
+        check_fn: Callable[[], List[ResourceStatus]],
         alert_manager: AlertManager,
         config: Optional[AlertingConfig] = None,
     ):
-        """Initialize inventory alert manager."""
+        """Initialize resource monitor.
+
+        Args:
+            check_fn: Callable that returns the current list of ResourceStatus objects.
+            alert_manager: AlertManager used to send alerts via configured channels.
+            config: AlertingConfig with thresholds and cooldown settings.
+        """
+        self.check_fn = check_fn
         self.alert_manager = alert_manager
         self.config = config or AlertingConfig()
         # Propagate service_name from config so all alert templates are consistent
         self.alert_manager.service_name = self.config.service_name
 
-        self._stratum_last_alert: Dict[Tuple[str, str], datetime] = {}
+        self._resource_last_alert: Dict[str, datetime] = {}
         self._global_last_alert: Optional[datetime] = None
         self._alerts_this_hour: List[datetime] = []
 
         logger.info(
-            f"InventoryAlertManager initialized: "
+            f"ResourceMonitor initialized: "
             f"critical_min={self.config.critical_min}, "
             f"warning_min={self.config.warning_min}, "
-            f"cooldown={self.config.per_stratum_cooldown_minutes}min"
+            f"cooldown={self.config.per_resource_cooldown_minutes}min"
         )
 
     def _cleanup_old_cooldowns(self, now: datetime) -> None:
         """Remove cooldown entries older than cooldown period plus buffer."""
         cutoff = now - timedelta(
-            minutes=self.config.per_stratum_cooldown_minutes
+            minutes=self.config.per_resource_cooldown_minutes
             + self.COOLDOWN_CLEANUP_BUFFER_MINUTES
         )
 
         keys_to_remove = [
             key
-            for key, last_alert in self._stratum_last_alert.items()
+            for key, last_alert in self._resource_last_alert.items()
             if last_alert < cutoff
         ]
 
         for key in keys_to_remove:
-            del self._stratum_last_alert[key]
+            del self._resource_last_alert[key]
 
         if keys_to_remove:
             logger.debug(f"Cleaned up {len(keys_to_remove)} old cooldown entries")
 
-    def check_and_alert(
-        self,
-        strata_inventory: List[Any],
-    ) -> InventoryAlertResult:
-        """Check inventory levels and send alerts for strata below thresholds."""
-        result = InventoryAlertResult(strata_checked=len(strata_inventory))
+    def check_and_alert(self) -> ResourceMonitorResult:
+        """Invoke check_fn and send alerts for resources below thresholds."""
+        resources = self.check_fn()
+        result = ResourceMonitorResult(resources_checked=len(resources))
         now = datetime.now(timezone.utc)
 
         self._cleanup_old_cooldowns(now)
 
-        critical_strata: List[StratumAlert] = []
-        warning_strata: List[StratumAlert] = []
+        critical_resources: List[ResourceStatus] = []
+        warning_resources: List[ResourceStatus] = []
 
-        for stratum in strata_inventory:
-            q_type = stratum.question_type.value
-            difficulty = stratum.difficulty.value
-            count = stratum.current_count
-
-            if count < self.config.critical_min:
-                critical_strata.append(
-                    StratumAlert(
-                        question_type=q_type,
-                        difficulty=difficulty,
-                        current_count=count,
-                        threshold=self.config.critical_min,
-                        severity=ErrorSeverity.CRITICAL,
-                    )
-                )
-            elif count < self.config.warning_min:
-                warning_strata.append(
-                    StratumAlert(
-                        question_type=q_type,
-                        difficulty=difficulty,
-                        current_count=count,
-                        threshold=self.config.warning_min,
-                        severity=ErrorSeverity.HIGH,
-                    )
-                )
+        for resource in resources:
+            if resource.count < self.config.critical_min:
+                critical_resources.append(resource)
+            elif resource.count < self.config.warning_min:
+                warning_resources.append(resource)
             else:
-                result.healthy_strata += 1
+                result.healthy_resources += 1
 
-        result.critical_strata = critical_strata
-        result.warning_strata = warning_strata
+        result.critical_resources = critical_resources
+        result.warning_resources = warning_resources
 
         if self.config.log_all_checks:
-            self._log_inventory_check(result)
+            self._log_resource_check(result)
 
-        if critical_strata:
-            alerts_sent, alerts_suppressed = self._send_inventory_alerts(
-                strata=critical_strata,
+        if critical_resources:
+            alerts_sent, alerts_suppressed = self._send_resource_alerts(
+                resources=critical_resources,
                 severity=ErrorSeverity.CRITICAL,
                 now=now,
             )
             result.alerts_sent += alerts_sent
             result.alerts_suppressed += alerts_suppressed
 
-        if warning_strata:
-            alerts_sent, alerts_suppressed = self._send_inventory_alerts(
-                strata=warning_strata,
+        if warning_resources:
+            alerts_sent, alerts_suppressed = self._send_resource_alerts(
+                resources=warning_resources,
                 severity=ErrorSeverity.HIGH,
                 now=now,
             )
@@ -1206,77 +1188,77 @@ class InventoryAlertManager:
             result.alerts_suppressed += alerts_suppressed
 
         logger.info(
-            f"Inventory alert check complete: "
+            f"Resource monitor check complete: "
             f"{result.alerts_sent} alerts sent, "
             f"{result.alerts_suppressed} suppressed by cooldown"
         )
 
         return result
 
-    def _send_inventory_alerts(
+    def _send_resource_alerts(
         self,
-        strata: List[StratumAlert],
+        resources: List[ResourceStatus],
         severity: ErrorSeverity,
         now: datetime,
     ) -> Tuple[int, int]:
-        """Send alerts for a list of strata with the given severity."""
+        """Send alerts for a list of resources with the given severity."""
         alerts_sent = 0
         alerts_suppressed = 0
 
-        alertable_strata: List[StratumAlert] = []
-        for stratum in strata:
-            key = (stratum.question_type, stratum.difficulty)
-            if self._is_in_cooldown(key, now):
+        alertable: List[ResourceStatus] = []
+        for resource in resources:
+            if self._is_in_cooldown(resource.name, now):
                 alerts_suppressed += 1
-                logger.debug(f"Alert suppressed for {key[0]}/{key[1]} (in cooldown)")
+                logger.debug(f"Alert suppressed for {resource.name!r} (in cooldown)")
             else:
-                alertable_strata.append(stratum)
+                alertable.append(resource)
 
-        if not alertable_strata:
+        if not alertable:
             return alerts_sent, alerts_suppressed
 
         if self._is_global_cooldown_active(now):
             logger.info(
-                f"Global cooldown active, suppressing {len(alertable_strata)} alerts"
+                f"Global cooldown active, suppressing {len(alertable)} alerts"
             )
-            return alerts_sent, alerts_suppressed + len(alertable_strata)
+            return alerts_sent, alerts_suppressed + len(alertable)
 
         if not self._check_hourly_rate_limit(now):
             logger.warning(
                 f"Hourly alert limit reached ({self.config.max_alerts_per_hour}), "
-                f"suppressing {len(alertable_strata)} alerts"
+                f"suppressing {len(alertable)} alerts"
             )
-            return alerts_sent, alerts_suppressed + len(alertable_strata)
+            return alerts_sent, alerts_suppressed + len(alertable)
 
-        alert_error = self._build_inventory_error(
-            strata=alertable_strata,
-            severity=severity,
+        threshold = (
+            self.config.critical_min
+            if severity == ErrorSeverity.CRITICAL
+            else self.config.warning_min
         )
-        context = self._build_inventory_context(alertable_strata)
+        alert_error = self._build_resource_error(alertable, severity, threshold)
+        context = self._build_resource_context(alertable, threshold)
 
         success = self.alert_manager.send_alert(alert_error, context)
 
         if success:
-            alerts_sent = len(alertable_strata)
-            for stratum in alertable_strata:
-                key = (stratum.question_type, stratum.difficulty)
-                self._stratum_last_alert[key] = now
+            alerts_sent = len(alertable)
+            for resource in alertable:
+                self._resource_last_alert[resource.name] = now
             self._global_last_alert = now
             self._alerts_this_hour.append(now)
 
-            self._write_inventory_alert_file(alertable_strata, severity)
+            self._write_resource_alert_file(alertable, severity)
         else:
-            alerts_suppressed += len(alertable_strata)
+            alerts_suppressed += len(alertable)
 
         return alerts_sent, alerts_suppressed
 
-    def _is_in_cooldown(self, key: Tuple[str, str], now: datetime) -> bool:
-        """Check if a stratum is in cooldown period."""
-        last_alert = self._stratum_last_alert.get(key)
+    def _is_in_cooldown(self, name: str, now: datetime) -> bool:
+        """Check if a resource is in cooldown period."""
+        last_alert = self._resource_last_alert.get(name)
         if last_alert is None:
             return False
 
-        cooldown_delta = timedelta(minutes=self.config.per_stratum_cooldown_minutes)
+        cooldown_delta = timedelta(minutes=self.config.per_resource_cooldown_minutes)
         return now < last_alert + cooldown_delta
 
     def _is_global_cooldown_active(self, now: datetime) -> bool:
@@ -1296,86 +1278,86 @@ class InventoryAlertManager:
 
         return len(self._alerts_this_hour) < self.config.max_alerts_per_hour
 
-    def _build_inventory_error(
+    def _build_resource_error(
         self,
-        strata: List[StratumAlert],
+        resources: List[ResourceStatus],
         severity: ErrorSeverity,
+        threshold: int,
     ) -> AlertError:
-        """Build an AlertError for inventory alerts."""
+        """Build an AlertError for resource alerts."""
         severity_word = "critical" if severity == ErrorSeverity.CRITICAL else "low"
-        threshold = strata[0].threshold if strata else 0
 
         message = (
-            f"{len(strata)} question strata have {severity_word} inventory levels "
-            f"(below {threshold} questions). "
-            f"Question generation may be needed to replenish inventory."
+            f"{len(resources)} resources have {severity_word} levels "
+            f"(below {threshold}). Replenishment may be needed."
         )
 
         recommended_actions: List[str] = []
         if self.config.include_recommendations:
             recommended_actions = [
-                "Review generation logs for any failures",
-                "Check LLM provider API quotas and billing",
+                "Review relevant logs for any failures",
+                "Check provider API quotas and billing",
                 "Review application logs for more context",
             ]
 
         return AlertError(
             category=ErrorCategory.RESOURCE_LOW,
             severity=severity,
-            provider="inventory",
-            original_error="LowInventory",
+            provider="resource-monitor",
+            original_error="LowResourceLevel",
             message=message,
             is_retryable=True,
             recommended_actions=recommended_actions,
         )
 
-    def _build_inventory_context(self, strata: List[StratumAlert]) -> str:
-        """Build context string with affected strata details."""
-        lines = ["Affected strata:"]
+    def _build_resource_context(
+        self, resources: List[ResourceStatus], threshold: int
+    ) -> str:
+        """Build context string with affected resource details."""
+        lines = ["Affected resources:"]
 
-        sorted_strata = sorted(strata, key=lambda s: s.current_count)
+        sorted_resources = sorted(resources, key=lambda r: r.count)
 
-        for stratum in sorted_strata[: self.config.max_strata_detail]:
+        for resource in sorted_resources[: self.config.max_resource_detail]:
             lines.append(
-                f"  - {stratum.question_type}/{stratum.difficulty}: "
-                f"{stratum.current_count} questions (threshold: {stratum.threshold})"
+                f"  - {resource.name}: {resource.count} (threshold: {threshold})"
             )
 
-        remaining = len(strata) - self.config.max_strata_detail
+        remaining = len(resources) - self.config.max_resource_detail
         if remaining > 0:
-            lines.append(f"  ... and {remaining} more strata")
+            lines.append(f"  ... and {remaining} more resources")
 
         return "\n".join(lines)
 
-    def _log_inventory_check(self, result: InventoryAlertResult) -> None:
-        """Log inventory check results to file."""
+    def _log_resource_check(self, result: ResourceMonitorResult) -> None:
+        """Log resource check results to file."""
         try:
-            log_path = Path(self.config.inventory_alert_file)
+            log_path = Path(self.config.resource_alert_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.now(timezone.utc).isoformat()
             entry = {
                 "timestamp": timestamp,
-                "type": "inventory_check",
-                "strata_checked": result.strata_checked,
-                "healthy_strata": result.healthy_strata,
-                "warning_strata": len(result.warning_strata),
-                "critical_strata": len(result.critical_strata),
+                "type": "resource_check",
+                "resources_checked": result.resources_checked,
+                "healthy_resources": result.healthy_resources,
+                "warning_resources": len(result.warning_resources),
+                "critical_resources": len(result.critical_resources),
             }
 
             with open(log_path, "a") as f:
                 f.write(json.dumps(entry) + "\n")
         except (IOError, OSError) as e:
-            logger.error(f"Failed to log inventory check: {e}")
+            logger.error(f"Failed to log resource check: {e}")
 
-    def _write_inventory_alert_file(
+    def _write_resource_alert_file(
         self,
-        strata: List[StratumAlert],
+        resources: List[ResourceStatus],
         severity: ErrorSeverity,
     ) -> None:
-        """Write inventory alert to dedicated alert file."""
+        """Write resource alert to dedicated alert file."""
         try:
-            log_path = Path(self.config.inventory_alert_file)
+            log_path = Path(self.config.resource_alert_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.now(timezone.utc).isoformat()
@@ -1390,22 +1372,19 @@ class InventoryAlertManager:
                 f"TIMESTAMP: {timestamp}",
                 f"SEVERITY: {severity_str}",
                 "TYPE: RESOURCE_LOW",
-                f"AFFECTED_STRATA: {len(strata)}",
+                f"AFFECTED_RESOURCES: {len(resources)}",
                 "",
             ]
 
-            for stratum in strata:
-                lines.append(
-                    f"  {stratum.question_type}/{stratum.difficulty}: "
-                    f"{stratum.current_count} (threshold: {stratum.threshold})"
-                )
+            for resource in resources:
+                lines.append(f"  {resource.name}: {resource.count}")
 
             lines.extend(["", "=" * 80, ""])
 
             with open(log_path, "a") as f:
                 f.write("\n".join(lines))
         except (IOError, OSError) as e:
-            logger.error(f"Failed to write inventory alert file: {e}")
+            logger.error(f"Failed to write resource alert file: {e}")
 
     def get_cooldown_status(self) -> Dict[str, Any]:
         """Get current cooldown status for debugging/monitoring."""
@@ -1413,13 +1392,11 @@ class InventoryAlertManager:
         one_hour_ago = now - timedelta(hours=1)
 
         active_cooldowns = {}
-        for key, last_alert in self._stratum_last_alert.items():
-            cooldown_delta = timedelta(minutes=self.config.per_stratum_cooldown_minutes)
+        for name, last_alert in self._resource_last_alert.items():
+            cooldown_delta = timedelta(minutes=self.config.per_resource_cooldown_minutes)
             if now < last_alert + cooldown_delta:
                 remaining = (last_alert + cooldown_delta - now).total_seconds() / 60
-                active_cooldowns[f"{key[0]}/{key[1]}"] = (
-                    f"{remaining:.1f} min remaining"
-                )
+                active_cooldowns[name] = f"{remaining:.1f} min remaining"
 
         return {
             "global_cooldown_active": self._is_global_cooldown_active(now),
@@ -1427,5 +1404,5 @@ class InventoryAlertManager:
                 [ts for ts in self._alerts_this_hour if ts > one_hour_ago]
             ),
             "max_alerts_per_hour": self.config.max_alerts_per_hour,
-            "active_stratum_cooldowns": active_cooldowns,
+            "active_resource_cooldowns": active_cooldowns,
         }
