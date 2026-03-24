@@ -32,16 +32,16 @@ from alerting.alerting import (
 
 class TestEnums:
     def test_error_category_is_str(self):
-        assert isinstance(ErrorCategory.BILLING_QUOTA, str)
-        assert ErrorCategory.BILLING_QUOTA == "billing_quota"
+        assert isinstance(ErrorCategory.AUTHENTICATION, str)
+        assert ErrorCategory.AUTHENTICATION == "authentication"
 
     def test_error_severity_is_str(self):
         assert isinstance(ErrorSeverity.CRITICAL, str)
         assert ErrorSeverity.CRITICAL == "critical"
 
     def test_category_string_comparison(self):
-        assert ErrorCategory.RATE_LIMIT == "rate_limit"
-        assert "rate_limit" == ErrorCategory.RATE_LIMIT
+        assert ErrorCategory.RESOURCE_LOW == "resource_low"
+        assert "resource_low" == ErrorCategory.RESOURCE_LOW
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +251,7 @@ class TestCreateHtmlAlert:
         err = MagicMock()
         err.message = message
         err.provider = provider
-        err.category = ErrorCategory.BILLING_QUOTA
+        err.category = ErrorCategory.AUTHENTICATION
         err.severity = ErrorSeverity.CRITICAL
         err.original_error = "<img src=x onerror=alert(1)>"
         return err
@@ -288,7 +288,7 @@ class TestServiceName:
         mgr = AlertManager(service_name="My App")
         err = MagicMock()
         err.severity = ErrorSeverity.CRITICAL
-        err.category = ErrorCategory.BILLING_QUOTA
+        err.category = ErrorCategory.SERVER_ERROR
         err.provider = "openai"
         subject = mgr._get_email_subject(err)
         assert "My App" in subject
@@ -300,7 +300,7 @@ class TestServiceName:
         err = MagicMock()
         err.message = "test"
         err.provider = "openai"
-        err.category = ErrorCategory.BILLING_QUOTA
+        err.category = ErrorCategory.SERVER_ERROR
         err.severity = ErrorSeverity.HIGH
         err.original_error = "err"
         html_body = mgr._create_html_alert(err, "Test. Recommended Actions: check logs")
@@ -355,11 +355,11 @@ class TestServiceName:
 class TestRecommendedActions:
     def _make_alert_error(self, recommended_actions=None):
         kwargs = dict(
-            category=ErrorCategory.BILLING_QUOTA,
+            category=ErrorCategory.AUTHENTICATION,
             severity=ErrorSeverity.HIGH,
             provider="openai",
-            original_error="QuotaExceeded",
-            message="Out of credits",
+            original_error="Unauthorized",
+            message="API key invalid",
         )
         if recommended_actions is not None:
             kwargs["recommended_actions"] = recommended_actions
@@ -380,8 +380,8 @@ class TestRecommendedActions:
         err = self._make_alert_error(recommended_actions=[])
         mgr = AlertManager()
         msg = mgr._build_alert_message(err)
-        # Category default for BILLING_QUOTA references "account balance"
-        assert "account balance" in msg
+        # Category default for AUTHENTICATION references "API key"
+        assert "API key" in msg
 
     def test_recommended_actions_included_in_to_dict_when_present(self):
         err = self._make_alert_error(recommended_actions=["Step 1", "Step 2"])

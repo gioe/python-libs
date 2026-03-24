@@ -45,17 +45,18 @@ logger = logging.getLogger(__name__)
 
 
 class ErrorCategory(str, Enum):
-    """Categories of API errors."""
+    """Categories of errors. Generic values reusable across services.
 
-    BILLING_QUOTA = "billing_quota"  # Insufficient funds, quota exceeded
-    RATE_LIMIT = "rate_limit"  # Rate limit/throttling errors
+    Clients may also pass arbitrary strings for categories not listed here —
+    ``AlertableError.category`` accepts any ``str``-compatible value.
+    """
+
     AUTHENTICATION = "authentication"  # API key invalid or expired
     INVALID_REQUEST = "invalid_request"  # Malformed request or invalid parameters
     SERVER_ERROR = "server_error"  # Provider server errors (5xx)
     NETWORK_ERROR = "network_error"  # Connection/timeout errors
-    MODEL_ERROR = "model_error"  # Model not found or unavailable
-    INVENTORY_LOW = "inventory_low"  # Question inventory below threshold
-    SCRIPT_FAILURE = "script_failure"  # Multiple question types failed in bootstrap
+    RESOURCE_LOW = "resource_low"  # A managed resource (inventory, quota, etc.) is low
+    JOB_FAILURE = "job_failure"  # A scheduled or background job failed
     UNKNOWN = "unknown"  # Unclassified errors
 
 
@@ -359,17 +360,17 @@ class AlertManager:
             logger.info(f"Discord circuit breaker alert sent for {provider_name}")
         return sent
 
-    def _send_billing_quota_discord_alert(
+    def _send_critical_discord_alert(
         self,
         classified_error: "AlertableError",
         context: Optional[str] = None,
     ) -> bool:
-        """Send a Discord alert for a BILLING_QUOTA classified error.
+        """Send a Discord alert for a CRITICAL severity error.
 
-        Uses the same 10-minute per-provider cooldown as circuit breaker alerts.
+        Uses a 10-minute per-provider cooldown (shared with circuit breaker alerts).
 
         Args:
-            classified_error: The classified BILLING_QUOTA error
+            classified_error: The CRITICAL error to alert on
             context: Additional context string
 
         Returns:
@@ -378,14 +379,19 @@ class AlertManager:
         if not self.discord_webhook_url:
             return False
 
-        cooldown_key = f"billing:{classified_error.provider}"
+        cooldown_key = f"critical:{classified_error.provider}"
         if self._is_discord_cooldown_active(cooldown_key):
             logger.debug(
-                f"Discord billing quota alert suppressed for {classified_error.provider} (cooldown active)"
+                f"Discord critical alert suppressed for {classified_error.provider} (cooldown active)"
             )
             return False
 
-        title = f"\U0001f6a8 Billing Quota Exhausted: {classified_error.provider}"
+        category_val = (
+            classified_error.category.value
+            if hasattr(classified_error.category, "value")
+            else str(classified_error.category)
+        )
+        title = f"\U0001f6a8 Critical Alert: {category_val.replace('_', ' ').title()} ({classified_error.provider})"
         description = classified_error.message
         if context:
             description += f"\n\n{context}"
@@ -411,7 +417,7 @@ class AlertManager:
         if sent:
             self._discord_cooldowns[cooldown_key] = time.time()
             logger.info(
-                f"Discord billing quota alert sent for {classified_error.provider}"
+                f"Discord critical alert sent for {classified_error.provider}"
             )
         return sent
 
@@ -459,16 +465,14 @@ class AlertManager:
                 logger.error(f"Failed to write alert file: {e}")
                 success = False
 
-        # Send Discord alert for BILLING_QUOTA errors
-        category_val = (
-            classified_error.category.value
-            if hasattr(classified_error.category, "value")
-            else str(classified_error.category)
+        # Send Discord alert for CRITICAL severity errors
+        severity_val = (
+            classified_error.severity.value
+            if hasattr(classified_error.severity, "value")
+            else str(classified_error.severity)
         )
-        # Safe to compare raw string to ErrorCategory member: ErrorCategory inherits from
-        # str, so its members equal their .value strings (e.g. "billing_quota").
-        if category_val == ErrorCategory.BILLING_QUOTA:
-            self._send_billing_quota_discord_alert(classified_error, context)
+        if severity_val == ErrorSeverity.CRITICAL:
+            self._send_critical_discord_alert(classified_error, context)
 
         # Track alert (with bounded memory)
         self.alerts_sent.append(
@@ -723,15 +727,6 @@ class AlertManager:
         if caller_actions:
             for i, action in enumerate(caller_actions, start=1):
                 lines.append(f"{i}. {action}")
-        elif category_val == ErrorCategory.BILLING_QUOTA:
-            lines.extend(
-                [
-                    f"1. Check your {classified_error.provider} account balance",
-                    "2. Review usage quotas and limits",
-                    "3. Add funds or upgrade plan if needed",
-                    "4. Verify billing information is up to date",
-                ]
-            )
         elif category_val == ErrorCategory.AUTHENTICATION:
             lines.extend(
                 [
@@ -739,31 +734,6 @@ class AlertManager:
                     "2. Check if API key has expired",
                     "3. Regenerate API key if necessary",
                     "4. Update environment variables with new key",
-                ]
-            )
-        elif category_val == ErrorCategory.RATE_LIMIT:
-            lines.extend(
-                [
-                    "1. Reduce request frequency",
-                    "2. Implement exponential backoff",
-                    "3. Consider upgrading API tier for higher limits",
-                ]
-            )
-        elif category_val == ErrorCategory.INVENTORY_LOW:
-            lines.extend(
-                [
-                    "1. Review generation logs for recent failures",
-                    "2. Check LLM provider API quotas and billing",
-                    "3. Review application logs for more context",
-                ]
-            )
-        elif category_val == ErrorCategory.SCRIPT_FAILURE:
-            lines.extend(
-                [
-                    "1. Check script logs for detailed error messages",
-                    "2. Review LLM provider status pages for outages",
-                    "3. Verify API keys are valid and have sufficient quota",
-                    "4. Check network connectivity to LLM providers",
                 ]
             )
         else:
@@ -1350,7 +1320,7 @@ class InventoryAlertManager:
             ]
 
         return AlertError(
-            category=ErrorCategory.INVENTORY_LOW,
+            category=ErrorCategory.RESOURCE_LOW,
             severity=severity,
             provider="inventory",
             original_error="LowInventory",
@@ -1419,7 +1389,7 @@ class InventoryAlertManager:
                 "=" * 80,
                 f"TIMESTAMP: {timestamp}",
                 f"SEVERITY: {severity_str}",
-                "TYPE: INVENTORY_LOW",
+                "TYPE: RESOURCE_LOW",
                 f"AFFECTED_STRATA: {len(strata)}",
                 "",
             ]
