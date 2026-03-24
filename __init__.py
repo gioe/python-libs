@@ -1,1 +1,1 @@
-# Shared libraries for AIQ services
+# Shared Python libraries for common service patterns

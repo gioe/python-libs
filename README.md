@@ -16,7 +16,7 @@ pip install "git+https://github.com/gioe/python-libs.git#egg=gioe-libs[observabi
 
 ## Modules
 
-### `gioe_libs.aiq_logging`
+### `gioe_libs.structured_logging`
 
 Structured logging configuration with JSON output support.
 

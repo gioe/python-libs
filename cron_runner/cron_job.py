@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
 from ..alerting.alerting import AlertManager, RunSummary
-from ..aiq_logging.logging_config import setup_logging
+from ..structured_logging.logging_config import setup_logging
 from ..observability.facade import ObservabilityFacade
 
 logger = logging.getLogger(__name__)
