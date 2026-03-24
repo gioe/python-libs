@@ -9,6 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Install from source: `pip install -e .`
 Install from GitHub: `pip install "git+https://github.com/gioe/python-libs.git[observability]"`
 
+> **Tip for consuming services:** `pip install -r requirements.txt` will report "already satisfied" for git-sourced packages even when the remote branch has new commits. Force a refresh with `pip install --force-reinstall <package-spec>` or the equivalent `--upgrade` flag.
+
 Python requirement: >=3.11
 
 ## Commands
@@ -68,6 +70,8 @@ Generic, project-agnostic enums reusable across unrelated services: `DifficultyL
 ## Tests
 
 Test files live in `*/tests/` within each module. The `observability/` module has its own `pytest.ini` defining `integration` and `slow` markers. No root-level conftest.
+
+> **Dev setup:** Run `pip install -e ".[observability]"` before running the full test suite. Without the observability extras, 27+ tests will fail with `No module named opentelemetry`.
 
 <!-- tusk-task-tools -->
 ## Tusk Task Lookup
