@@ -172,6 +172,12 @@ class AlertManager:
     # Timeout for Discord webhook HTTP requests (seconds)
     DISCORD_HTTP_TIMEOUT = 10
 
+    # Resend HTTP email API endpoint
+    RESEND_API_URL = "https://api.resend.com/emails"
+
+    # Timeout for Resend API requests (seconds)
+    RESEND_HTTP_TIMEOUT = 10
+
     def __init__(
         self,
         email_enabled: bool = False,
@@ -183,6 +189,7 @@ class AlertManager:
         to_emails: Optional[List[str]] = None,
         alert_file_path: Optional[str] = None,
         discord_webhook_url: Optional[str] = None,
+        resend_api_key: Optional[str] = None,
         service_name: str = "Alerting Service",
     ):
         """Initialize alert manager.
@@ -197,6 +204,7 @@ class AlertManager:
             to_emails: List of recipient email addresses
             alert_file_path: Path to file for logging critical alerts
             discord_webhook_url: Discord webhook URL for circuit breaker / quota alerts
+            resend_api_key: Resend API key for HTTP-based email delivery (alternative to SMTP)
             service_name: Name of the service shown in alert templates
         """
         self.email_enabled = email_enabled
@@ -208,6 +216,7 @@ class AlertManager:
         self.to_emails = to_emails or []
         self.alert_file_path = alert_file_path
         self.discord_webhook_url = discord_webhook_url
+        self.resend_api_key = resend_api_key
         self.service_name = service_name
 
         # Track last Discord alert time per provider for cooldown enforcement
@@ -318,6 +327,47 @@ class AlertManager:
         except Exception as exc:
             logger.warning(f"Discord webhook request failed: {exc}")
             return False
+
+    def _send_resend_email(self, subject: str, html_body: str, text_body: str) -> None:
+        """Send an email via the Resend HTTP API (no SMTP required).
+
+        Uses stdlib urllib so no extra dependencies are needed.
+
+        Args:
+            subject: Email subject line.
+            html_body: HTML email body.
+            text_body: Plain-text email body.
+
+        Raises:
+            RuntimeError: If the Resend API returns a non-2xx status code.
+            ValueError: If required fields (api key, from/to addresses) are missing.
+        """
+        if not self.resend_api_key:
+            raise ValueError("resend_api_key must be set to use Resend email delivery")
+        if not self.from_email:
+            raise ValueError("from_email must be set for Resend email delivery")
+        if not self.to_emails:
+            raise ValueError("to_emails must be set for Resend email delivery")
+
+        payload = json.dumps({
+            "from": self.from_email,
+            "to": self.to_emails,
+            "subject": subject,
+            "html": html_body,
+            "text": text_body,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            url=self.RESEND_API_URL,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self.resend_api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=self.RESEND_HTTP_TIMEOUT) as resp:
+            if resp.status not in (200, 201):
+                raise RuntimeError(f"Resend API returned HTTP {resp.status}")
 
     def send_circuit_breaker_alert(self, provider_name: str, reason: str) -> bool:
         """Send a Discord alert when a circuit breaker opens (CLOSED→OPEN).
@@ -562,6 +612,15 @@ class AlertManager:
                 logger.info(f"Notification email sent: {title!r}")
             except Exception as e:
                 logger.error(f"Failed to send notification email: {e}")
+
+        if self.resend_api_key:
+            try:
+                html_body = self._build_notification_html(title, fields, severity, metadata)
+                text_body = self._build_notification_text(title, fields, severity, metadata)
+                self._send_resend_email(title, html_body, text_body)
+                logger.info(f"Resend notification sent: {title!r}")
+            except Exception as e:
+                logger.error(f"Failed to send Resend notification: {e}")
 
         if self.discord_webhook_url:
             color = {
