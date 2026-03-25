@@ -430,6 +430,50 @@ class TestOTELBackendMetricsIntegration:
 
         backend.shutdown()
 
+    def test_otlp_metric_exporter_uses_cumulative_temporality(self) -> None:
+        """Regression test: OTLPMetricExporter must use CUMULATIVE for all instrument types.
+
+        The SDK default for Counter and Histogram is DELTA, which Grafana/Mimir rejects.
+        This test catches any regression where preferred_temporality is omitted or reverted.
+        """
+        from opentelemetry.sdk.metrics.export import AggregationTemporality
+        from opentelemetry.sdk.metrics._internal.instrument import (
+            Counter,
+            Histogram,
+            ObservableCounter,
+            ObservableGauge,
+            ObservableUpDownCounter,
+            UpDownCounter,
+        )
+
+        config = OTELConfig(
+            enabled=True,
+            exporter="otlp",
+            endpoint="http://localhost:4317",
+            traces_enabled=False,
+            metrics_enabled=True,
+            logs_enabled=False,
+            prometheus_enabled=False,
+        )
+        backend = OTELBackend(config)
+        backend.init()
+
+        assert backend._meter_provider is not None, "MeterProvider was not created"
+        readers = backend._meter_provider._sdk_config.metric_readers
+        assert len(readers) == 1, f"Expected 1 reader, got {len(readers)}"
+
+        exporter = readers[0]._exporter
+        temporality = exporter._preferred_temporality
+
+        instrument_types = [Counter, UpDownCounter, Histogram, ObservableCounter, ObservableUpDownCounter, ObservableGauge]
+        for instrument_type in instrument_types:
+            assert temporality.get(instrument_type) == AggregationTemporality.CUMULATIVE, (
+                f"{instrument_type.__name__} has temporality {temporality.get(instrument_type)!r}, "
+                f"expected CUMULATIVE — Grafana/Mimir will reject DELTA metrics"
+            )
+
+        backend.shutdown()
+
 
 class TestOTELBackendMetricsInit:
     """Tests for OTEL backend metrics initialization (mocked)."""
