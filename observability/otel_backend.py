@@ -402,11 +402,33 @@ class OTELBackend:
                     from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
                         OTLPMetricExporter,
                     )
+                    from opentelemetry.sdk.metrics.export import AggregationTemporality
+                    from opentelemetry.sdk.metrics._internal.instrument import (
+                        Counter,
+                        Histogram,
+                        ObservableCounter,
+                        ObservableGauge,
+                        ObservableUpDownCounter,
+                        UpDownCounter,
+                    )
+
+                    # Grafana OTLP gateway (Mimir) requires CUMULATIVE temporality.
+                    # The SDK default for Counter and Histogram is DELTA, which Grafana
+                    # rejects with "invalid temporality and type combination".
+                    _grafana_temporality = {
+                        Counter: AggregationTemporality.CUMULATIVE,
+                        UpDownCounter: AggregationTemporality.CUMULATIVE,
+                        Histogram: AggregationTemporality.CUMULATIVE,
+                        ObservableCounter: AggregationTemporality.CUMULATIVE,
+                        ObservableUpDownCounter: AggregationTemporality.CUMULATIVE,
+                        ObservableGauge: AggregationTemporality.CUMULATIVE,
+                    }
 
                     endpoint = self._config.endpoint.rstrip("/")
                     exporter = OTLPMetricExporter(
                         endpoint=f"{endpoint}/v1/metrics",
                         headers=otlp_headers if otlp_headers else None,
+                        preferred_temporality=_grafana_temporality,
                     )
                     reader = PeriodicExportingMetricReader(
                         exporter,
