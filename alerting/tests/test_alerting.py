@@ -52,21 +52,7 @@ class TestEnums:
 class TestAlertManagerInit:
     def test_defaults(self):
         mgr = AlertManager()
-        assert mgr.email_enabled is False
         assert mgr.alerts_sent == []
-
-    def test_email_config(self):
-        mgr = AlertManager(
-            email_enabled=True,
-            smtp_host="smtp.example.com",
-            smtp_port=587,
-            smtp_username="user",
-            smtp_password="secret",  # pragma: allowlist secret
-            from_email="from@example.com",
-            to_emails=["to@example.com"],
-        )
-        assert mgr.email_enabled is True
-        assert mgr.smtp_host == "smtp.example.com"
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +61,8 @@ class TestAlertManagerInit:
 
 
 class TestSendNotification:
-    def test_noop_when_email_disabled_and_no_discord(self):
-        """send_notification is a no-op when email is disabled and no Discord URL."""
+    def test_noop_when_no_discord(self):
+        """send_notification is a no-op when no Discord URL is configured."""
         mgr = AlertManager()
         mgr.send_notification(
             title="Test",
@@ -149,52 +135,6 @@ class TestSendNotification:
         field_names = [f["name"] for f in kwargs["fields"]]
         assert "Details" in field_names
 
-    def test_smtp_error_caught_and_logged(self, caplog):
-        """SMTP errors are caught and logged, not raised."""
-        import smtplib
-        import logging
-
-        mgr = AlertManager(
-            email_enabled=True,
-            smtp_host="smtp.example.com",
-            smtp_port=587,
-            smtp_username="user@example.com",
-            smtp_password="test-password-not-real",  # pragma: allowlist secret
-            from_email="alerts@example.com",
-            to_emails=["recipient@example.com"],
-        )
-        with patch("smtplib.SMTP") as mock_smtp_class:
-            mock_smtp_class.return_value.__enter__.return_value.send_message.side_effect = (
-                smtplib.SMTPException("connection refused")
-            )
-            with caplog.at_level(logging.ERROR):
-                mgr.send_notification(title="Test", fields=[("Key", "val")], severity="info")
-
-        assert any("Failed to send notification email" in r.message for r in caplog.records)
-
-    def test_email_sent_when_enabled(self):
-        """Email is sent when email_enabled and SMTP is configured."""
-        from unittest.mock import MagicMock
-
-        mgr = AlertManager(
-            email_enabled=True,
-            smtp_host="smtp.example.com",
-            smtp_port=587,
-            smtp_username="user@example.com",
-            smtp_password="test-password-not-real",  # pragma: allowlist secret
-            from_email="alerts@example.com",
-            to_emails=["recipient@example.com"],
-        )
-        with patch("smtplib.SMTP") as mock_smtp_class:
-            mock_server = MagicMock()
-            mock_smtp_class.return_value.__enter__.return_value = mock_server
-            mgr.send_notification(
-                title="Run Complete",
-                fields=[("Generated", 10), ("Inserted", 8)],
-                severity="info",
-            )
-            mock_server.send_message.assert_called_once()
-
     def test_dict_value_formatted_as_string(self):
         """A dict value in fields is rendered as 'k: v' pairs."""
         mgr = AlertManager(discord_webhook_url="https://discord.example.com/webhook")
@@ -247,36 +187,7 @@ class TestLogResourceCheck:
 
 
 # ---------------------------------------------------------------------------
-# _create_html_alert — html.escape applied
-# ---------------------------------------------------------------------------
-
-
-class TestCreateHtmlAlert:
-    def _make_error(self, message="<script>xss</script>", provider="<evil>"):
-        err = MagicMock()
-        err.message = message
-        err.provider = provider
-        err.category = ErrorCategory.AUTHENTICATION
-        err.severity = ErrorSeverity.CRITICAL
-        err.original_error = "<img src=x onerror=alert(1)>"
-        return err
-
-    def test_html_escaped_in_output(self):
-        mgr = AlertManager()
-        err = self._make_error()
-        html_body = mgr._create_html_alert(
-            classified_error=err,
-            alert_message="Test alert. Recommended Actions: check logs",
-        )
-        assert "<script>" not in html_body
-        assert "&lt;script&gt;" in html_body
-        assert "<evil>" not in html_body
-        assert "&lt;evil&gt;" in html_body
-        assert "&lt;img" in html_body
-
-
-# ---------------------------------------------------------------------------
-# service_name — interpolation in email templates
+# service_name — interpolation in alert templates
 # ---------------------------------------------------------------------------
 
 
@@ -288,29 +199,6 @@ class TestServiceName:
     def test_alert_manager_custom_service_name(self):
         mgr = AlertManager(service_name="My App")
         assert mgr.service_name == "My App"
-
-    def test_email_subject_uses_service_name(self):
-        mgr = AlertManager(service_name="My App")
-        err = MagicMock()
-        err.severity = ErrorSeverity.CRITICAL
-        err.category = ErrorCategory.SERVER_ERROR
-        err.provider = "openai"
-        subject = mgr._get_email_subject(err)
-        assert "My App" in subject
-        assert "IQ Tracker" not in subject
-        assert "AIQ" not in subject
-
-    def test_html_footer_uses_service_name(self):
-        mgr = AlertManager(service_name="Acme Alerts")
-        err = MagicMock()
-        err.message = "test"
-        err.provider = "openai"
-        err.category = ErrorCategory.SERVER_ERROR
-        err.severity = ErrorSeverity.HIGH
-        err.original_error = "err"
-        html_body = mgr._create_html_alert(err, "Test. Recommended Actions: check logs")
-        assert "Acme Alerts" in html_body
-        assert "IQ Tracker" not in html_body
 
     def test_alerting_config_default_service_name(self):
         config = AlertingConfig()

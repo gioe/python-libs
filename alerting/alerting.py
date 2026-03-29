@@ -7,25 +7,17 @@ This module has no service-specific dependencies — it can be
 imported by any service that sets PYTHONPATH to include the repo root.
 """
 
-import html as html_module
 import json
 import logging
-import re
-import smtplib
 import time
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 import yaml
-
-# Basic email format validation pattern (RFC 5322 simplified)
-_EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
 
 def _format_value(value: Any) -> str:
@@ -158,9 +150,6 @@ class AlertManager:
     # Maximum number of alerts to retain in memory
     MAX_ALERTS_RETENTION = 1000
 
-    # Default SMTP timeout in seconds
-    SMTP_TIMEOUT_SECONDS = 30
-
     # Discord color codes (decimal)
     DISCORD_COLOR_SUCCESS = 0x28A745   # Green
     DISCORD_COLOR_WARNING = 0xFFC107   # Yellow
@@ -172,51 +161,21 @@ class AlertManager:
     # Timeout for Discord webhook HTTP requests (seconds)
     DISCORD_HTTP_TIMEOUT = 10
 
-    # Resend HTTP email API endpoint
-    RESEND_API_URL = "https://api.resend.com/emails"
-
-    # Timeout for Resend API requests (seconds)
-    RESEND_HTTP_TIMEOUT = 10
-
     def __init__(
         self,
-        email_enabled: bool = False,
-        smtp_host: Optional[str] = None,
-        smtp_port: int = 587,
-        smtp_username: Optional[str] = None,
-        smtp_password: Optional[str] = None,
-        from_email: Optional[str] = None,
-        to_emails: Optional[List[str]] = None,
         alert_file_path: Optional[str] = None,
         discord_webhook_url: Optional[str] = None,
-        resend_api_key: Optional[str] = None,
         service_name: str = "Alerting Service",
     ):
         """Initialize alert manager.
 
         Args:
-            email_enabled: Enable email alerts
-            smtp_host: SMTP server host
-            smtp_port: SMTP server port (default: 587 for TLS)
-            smtp_username: SMTP username
-            smtp_password: SMTP password
-            from_email: Sender email address
-            to_emails: List of recipient email addresses
             alert_file_path: Path to file for logging critical alerts
             discord_webhook_url: Discord webhook URL for circuit breaker / quota alerts
-            resend_api_key: Resend API key for HTTP-based email delivery (alternative to SMTP)
             service_name: Name of the service shown in alert templates
         """
-        self.email_enabled = email_enabled
-        self.smtp_host = smtp_host
-        self.smtp_port = smtp_port
-        self.smtp_username = smtp_username
-        self.smtp_password = smtp_password
-        self.from_email = from_email
-        self.to_emails = to_emails or []
         self.alert_file_path = alert_file_path
         self.discord_webhook_url = discord_webhook_url
-        self.resend_api_key = resend_api_key
         self.service_name = service_name
 
         # Track last Discord alert time per provider for cooldown enforcement
@@ -225,50 +184,8 @@ class AlertManager:
         # Track alerts sent (capped to prevent unbounded memory growth)
         self.alerts_sent: List[dict] = []
 
-        if self.email_enabled:
-            _missing = []
-            if not smtp_host:
-                _missing.append("SMTP_HOST")
-            if not smtp_username:
-                _missing.append("SMTP_USERNAME")
-            if not smtp_password:
-                _missing.append("SMTP_PASSWORD")
-            if not from_email:
-                _missing.append("ALERT_FROM_EMAIL")
-            if _missing:
-                logger.warning(
-                    "Email alerts enabled but required variable(s) not set: %s. "
-                    "Email alerts will not be sent.",
-                    ", ".join(_missing),
-                )
-                self.email_enabled = False
-            elif not self.to_emails:
-                logger.warning(
-                    "Email alerts enabled but no recipients configured. "
-                    "Email alerts will not be sent."
-                )
-                self.email_enabled = False
-            else:
-                # Validate email formats
-                if from_email and not _EMAIL_PATTERN.match(from_email):
-                    logger.warning(
-                        f"Invalid from_email format: {from_email}. "
-                        "Email alerts will not be sent."
-                    )
-                    self.email_enabled = False
-                invalid_recipients = [
-                    e for e in self.to_emails if not _EMAIL_PATTERN.match(e)
-                ]
-                if invalid_recipients:
-                    logger.warning(
-                        f"Invalid recipient email format(s): {invalid_recipients}. "
-                        "Email alerts will not be sent."
-                    )
-                    self.email_enabled = False
-
         logger.info(
-            f"AlertManager initialized: email_enabled={self.email_enabled}, "
-            f"alert_file={bool(self.alert_file_path)}, "
+            f"AlertManager initialized: alert_file={bool(self.alert_file_path)}, "
             f"discord_enabled={bool(self.discord_webhook_url)}"
         )
 
@@ -327,47 +244,6 @@ class AlertManager:
         except Exception as exc:
             logger.warning(f"Discord webhook request failed: {exc}")
             return False
-
-    def _send_resend_email(self, subject: str, html_body: str, text_body: str) -> None:
-        """Send an email via the Resend HTTP API (no SMTP required).
-
-        Uses stdlib urllib so no extra dependencies are needed.
-
-        Args:
-            subject: Email subject line.
-            html_body: HTML email body.
-            text_body: Plain-text email body.
-
-        Raises:
-            RuntimeError: If the Resend API returns a non-2xx status code.
-            ValueError: If required fields (api key, from/to addresses) are missing.
-        """
-        if not self.resend_api_key:
-            raise ValueError("resend_api_key must be set to use Resend email delivery")
-        if not self.from_email:
-            raise ValueError("from_email must be set for Resend email delivery")
-        if not self.to_emails:
-            raise ValueError("to_emails must be set for Resend email delivery")
-
-        payload = json.dumps({
-            "from": self.from_email,
-            "to": self.to_emails,
-            "subject": subject,
-            "html": html_body,
-            "text": text_body,
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            url=self.RESEND_API_URL,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {self.resend_api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=self.RESEND_HTTP_TIMEOUT) as resp:
-            if resp.status not in (200, 201):
-                raise RuntimeError(f"Resend API returned HTTP {resp.status}")
 
     def send_circuit_breaker_alert(self, provider_name: str, reason: str) -> bool:
         """Send a Discord alert when a circuit breaker opens (CLOSED→OPEN).
@@ -504,20 +380,6 @@ class AlertManager:
 
         success = True
 
-        # Send email alert if enabled
-        if self.email_enabled:
-            try:
-                self._send_email_alert(classified_error, alert_message)
-                category_str = (
-                    classified_error.category.value
-                    if hasattr(classified_error.category, "value")
-                    else str(classified_error.category)
-                )
-                logger.info(f"Email alert sent for {category_str}")
-            except Exception as e:
-                logger.error(f"Failed to send email alert: {e}")
-                success = False
-
         # Write to alert file if configured
         if self.alert_file_path:
             try:
@@ -559,20 +421,19 @@ class AlertManager:
         severity: str = "info",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Send a generic notification via email and Discord.
+        """Send a generic notification via Discord.
 
-        SMTP and Discord errors are caught and logged; they never raise to the
-        caller.
+        Discord errors are caught and logged; they never raise to the caller.
 
         Args:
-            title: Notification title (used as email subject and Discord embed title).
+            title: Notification title (used as Discord embed title).
             fields: List of (label, value) tuples rendered as the main content table.
                 Values may be strings, numbers, dicts, or lists — all are formatted
                 as human-readable strings automatically.
             severity: Controls color styling. One of ``"info"`` (green),
                 ``"warning"`` (yellow), or ``"critical"`` (red).
             metadata: Optional dict rendered as a secondary section at the end of
-                both the email body and the Discord embed.
+                the Discord embed.
         """
         _VALID_SEVERITIES = {"info", "warning", "critical"}
         if severity.lower() not in _VALID_SEVERITIES:
@@ -582,45 +443,6 @@ class AlertManager:
                 severity,
                 ", ".join(sorted(_VALID_SEVERITIES)),
             )
-
-        if self.email_enabled:
-            try:
-                text_body = self._build_notification_text(title, fields, severity, metadata)
-                html_body = self._build_notification_html(title, fields, severity, metadata)
-
-                msg = MIMEMultipart("alternative")
-                msg["Subject"] = title
-                msg["From"] = self.from_email or ""
-                msg["To"] = ", ".join(self.to_emails)
-                msg.attach(MIMEText(text_body, "plain"))
-                msg.attach(MIMEText(html_body, "html"))
-
-                if self.smtp_host is None:
-                    raise ValueError("SMTP host must be configured for email alerts")
-                if self.smtp_username is None:
-                    raise ValueError("SMTP username must be configured for email alerts")
-                if self.smtp_password is None:
-                    raise ValueError("SMTP password must be configured for email alerts")
-
-                with smtplib.SMTP(
-                    self.smtp_host, self.smtp_port, timeout=self.SMTP_TIMEOUT_SECONDS
-                ) as server:
-                    server.starttls()
-                    server.login(self.smtp_username, self.smtp_password)
-                    server.send_message(msg)
-
-                logger.info(f"Notification email sent: {title!r}")
-            except Exception as e:
-                logger.error(f"Failed to send notification email: {e}")
-
-        if self.resend_api_key:
-            try:
-                html_body = self._build_notification_html(title, fields, severity, metadata)
-                text_body = self._build_notification_text(title, fields, severity, metadata)
-                self._send_resend_email(title, html_body, text_body)
-                logger.info(f"Resend notification sent: {title!r}")
-            except Exception as e:
-                logger.error(f"Failed to send Resend notification: {e}")
 
         if self.discord_webhook_url:
             color = {
@@ -649,265 +471,15 @@ class AlertManager:
             except Exception:
                 logger.warning("Discord notification failed", exc_info=True)
 
-    def _build_notification_text(
-        self,
-        title: str,
-        fields: List[Tuple[str, Any]],
-        severity: str,
-        metadata: Optional[Dict[str, Any]],
-    ) -> str:
-        """Build plain-text notification body."""
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        lines = [
-            title,
-            f"Time: {timestamp}",
-            f"Severity: {severity.upper()}",
-            "",
-        ]
-        for label, value in fields:
-            lines.append(f"  {label}: {_format_value(value)}")
-        if metadata:
-            lines += ["", "Details:"]
-            for k, v in metadata.items():
-                lines.append(f"  {k}: {v}")
-        return "\n".join(lines)
-
-    def _build_notification_html(
-        self,
-        title: str,
-        fields: List[Tuple[str, Any]],
-        severity: str,
-        metadata: Optional[Dict[str, Any]],
-    ) -> str:
-        """Build HTML notification email body."""
-        color = {
-            "info": "#28a745",
-            "warning": "#ffc107",
-            "critical": "#dc3545",
-        }.get(severity.lower(), "#28a745")
-
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-        rows = "".join(
-            f"<tr><td>{html_module.escape(str(label))}</td>"
-            f"<td>{html_module.escape(_format_value(value))}</td></tr>"
-            for label, value in fields
-        )
-
-        metadata_section = ""
-        if metadata:
-            meta_rows = "".join(
-                f"<tr><td>{html_module.escape(str(k))}</td>"
-                f"<td>{html_module.escape(str(v))}</td></tr>"
-                for k, v in metadata.items()
-            )
-            metadata_section = f"""
-            <h3>Details</h3>
-            <table>
-                <tr><th>Key</th><th>Value</th></tr>
-                {meta_rows}
-            </table>"""
-
-        return f"""
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-                .status-box {{
-                    border-left: 4px solid {color};
-                    padding: 15px;
-                    background-color: #f8f9fa;
-                    margin: 20px 0;
-                }}
-                .title {{ color: {color}; font-weight: bold; font-size: 18px; }}
-                table {{
-                    border-collapse: collapse;
-                    width: 100%;
-                    max-width: 400px;
-                    margin-top: 15px;
-                }}
-                th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #dee2e6; }}
-                th {{ background-color: #e9ecef; font-weight: bold; }}
-                h3 {{
-                    margin-top: 25px;
-                    margin-bottom: 5px;
-                    font-size: 14px;
-                    color: #495057;
-                    text-transform: uppercase;
-                    letter-spacing: 0.05em;
-                }}
-                .footer {{ margin-top: 30px; font-size: 12px; color: #6c757d; }}
-            </style>
-        </head>
-        <body>
-            <div class="status-box">
-                <div class="title">{html_module.escape(title)}</div>
-                <div>Time: {timestamp}</div>
-            </div>
-            <table>
-                <tr><th>Field</th><th>Value</th></tr>
-                {rows}
-            </table>
-            {metadata_section}
-            <div class="footer"><p>This is an automated notification.</p></div>
-        </body>
-        </html>
-        """
-
-    @staticmethod
-    def _display_name(key: str) -> str:
-        """Convert an underscore-separated key to a title-cased display name."""
-        return key.replace("_", " ").title()
-
-    def _build_completion_text(self, errors: int, run_summary: dict) -> str:
-        """Build a plain-text completion summary email body.
-
-        Args:
-            errors: Number of errors encountered during the run (0 = success).
-            run_summary: Dict optionally containing a ``details`` sub-dict with
-                keys: ``questions_requested``, ``questions_rejected``,
-                ``duplicates_found``, ``by_type``, ``by_difficulty``,
-                ``error_message``.
-        """
-        details = run_summary.get("details", {}) if run_summary else {}
-
-        def _val(key: str) -> str:
-            v = details.get(key)
-            return str(v) if v is not None else "N/A"
-
-        lines = [
-            f"Questions Requested: {_val('questions_requested')}",
-            f"Questions Rejected:  {_val('questions_rejected')}",
-            f"Duplicates Found:    {_val('duplicates_found')}",
-        ]
-
-        by_type = details.get("by_type") or {}
-        if by_type:
-            lines.append("\nBy Type:")
-            for k, v in by_type.items():
-                lines.append(f"  {k}: {v}")
-
-        by_difficulty = details.get("by_difficulty") or {}
-        if by_difficulty:
-            lines.append("\nBy Difficulty:")
-            for k, v in by_difficulty.items():
-                lines.append(f"  {k}: {v}")
-
-        error_message = details.get("error_message")
-        if errors and error_message:
-            lines.append(f"\nError: {error_message}")
-
-        return "\n".join(lines)
-
-    def _build_completion_html(self, errors: int, run_summary: dict) -> str:
-        """Build an HTML completion summary email body.
-
-        Args:
-            errors: Number of errors encountered during the run (0 = success).
-            run_summary: Same structure as ``_build_completion_text``.
-        """
-        details = run_summary.get("details", {}) if run_summary else {}
-
-        def _val(key: str) -> str:
-            v = details.get(key)
-            return str(v) if v is not None else "N/A"
-
-        stat_rows = (
-            f"<tr><td>Questions Requested</td><td>{html_module.escape(_val('questions_requested'))}</td></tr>"
-            f"<tr><td>Questions Rejected</td><td>{html_module.escape(_val('questions_rejected'))}</td></tr>"
-            f"<tr><td>Duplicates Found</td><td>{html_module.escape(_val('duplicates_found'))}</td></tr>"
-        )
-
-        by_type = details.get("by_type") or {}
-        by_type_section = ""
-        if by_type:
-            rows = "".join(
-                f"<tr><td>{html_module.escape(self._display_name(k))}</td>"
-                f"<td>{html_module.escape(str(v))}</td></tr>"
-                for k, v in by_type.items()
-            )
-            by_type_section = f"""
-            <h3>By Type</h3>
-            <table>
-                <tr><th>Type</th><th>Inserted</th></tr>
-                {rows}
-            </table>"""
-
-        by_difficulty = details.get("by_difficulty") or {}
-        by_difficulty_section = ""
-        if by_difficulty:
-            rows = "".join(
-                f"<tr><td>{html_module.escape(self._display_name(k))}</td>"
-                f"<td>{html_module.escape(str(v))}</td></tr>"
-                for k, v in by_difficulty.items()
-            )
-            by_difficulty_section = f"""
-            <h3>By Difficulty</h3>
-            <table>
-                <tr><th>Difficulty</th><th>Count</th></tr>
-                {rows}
-            </table>"""
-
-        error_message = details.get("error_message")
-        error_section = ""
-        if errors and error_message:
-            error_section = f"""
-            <div class="error-box">
-                <strong>Error:</strong> {html_module.escape(str(error_message))}
-            </div>"""
-
-        return f"""
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-                table {{
-                    border-collapse: collapse;
-                    width: 100%;
-                    max-width: 400px;
-                    margin-top: 15px;
-                }}
-                th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #dee2e6; }}
-                th {{ background-color: #e9ecef; font-weight: bold; }}
-                h3 {{
-                    margin-top: 25px;
-                    margin-bottom: 5px;
-                    font-size: 14px;
-                    color: #495057;
-                    text-transform: uppercase;
-                    letter-spacing: 0.05em;
-                }}
-                .error-box {{
-                    border-left: 4px solid #dc3545;
-                    padding: 12px;
-                    background-color: #f8d7da;
-                    margin: 20px 0;
-                    color: #721c24;
-                }}
-            </style>
-        </head>
-        <body>
-            <table>
-                <tr><th>Field</th><th>Value</th></tr>
-                {stat_rows}
-            </table>
-            {by_type_section}
-            {by_difficulty_section}
-            {error_section}
-        </body>
-        </html>
-        """
-
     def send_run_completion(
         self,
         exit_code: int,
         run_summary: Optional[RunSummary] = None,
     ) -> None:
-        """Send a run-completion notification via email and/or Discord.
+        """Send a run-completion notification via Discord.
 
-        Email is sent only when ``email_enabled=True``.  Discord is sent
-        whenever ``discord_webhook_url`` is configured.  Errors from either
-        channel are caught and logged at WARNING/ERROR level — they never
+        Discord is sent whenever ``discord_webhook_url`` is configured.
+        Errors are caught and logged at WARNING/ERROR level — they never
         propagate to the caller or affect the job's exit code.
 
         Args:
@@ -917,46 +489,6 @@ class AlertManager:
                 duration_seconds (float), details (dict of extra fields).
         """
         run_summary = run_summary or {}
-        errors = run_summary.get("errors", 0) or 0
-
-        if self.email_enabled:
-            try:
-                subject = (
-                    "\u2705 Question Generation: Success"
-                    if exit_code == 0
-                    else (
-                        "\u26a0\ufe0f Question Generation: Partial Failure"
-                        if exit_code == 1
-                        else f"\u274c Question Generation: Failed (exit {exit_code})"
-                    )
-                )
-                text_body = self._build_completion_text(errors, run_summary)
-                html_body = self._build_completion_html(errors, run_summary)
-
-                msg = MIMEMultipart("alternative")
-                msg["Subject"] = subject
-                msg["From"] = self.from_email or ""
-                msg["To"] = ", ".join(self.to_emails)
-                msg.attach(MIMEText(text_body, "plain"))
-                msg.attach(MIMEText(html_body, "html"))
-
-                if self.smtp_host is None:
-                    raise ValueError("SMTP host must be configured for email alerts")
-                if self.smtp_username is None:
-                    raise ValueError("SMTP username must be configured for email alerts")
-                if self.smtp_password is None:
-                    raise ValueError("SMTP password must be configured for email alerts")
-
-                with smtplib.SMTP(
-                    self.smtp_host, self.smtp_port, timeout=self.SMTP_TIMEOUT_SECONDS
-                ) as server:
-                    server.starttls()
-                    server.login(self.smtp_username, self.smtp_password)
-                    server.send_message(msg)
-
-                logger.info(f"Run completion email sent (exit_code={exit_code})")
-            except Exception as e:
-                logger.error(f"Failed to send run completion email: {e}")
 
         if self.discord_webhook_url:
             title, description, color, fields = self._format_run_summary_embed(
@@ -1128,156 +660,6 @@ class AlertManager:
             )
 
         return "\n".join(lines)
-
-    def _send_email_alert(
-        self,
-        classified_error: "AlertableError",
-        alert_message: str,
-    ) -> None:
-        """Send email alert."""
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = self._get_email_subject(classified_error)
-        msg["From"] = self.from_email or ""
-        msg["To"] = ", ".join(self.to_emails)
-
-        text_body = alert_message
-        html_body = self._create_html_alert(classified_error, alert_message)
-
-        msg.attach(MIMEText(text_body, "plain"))
-        msg.attach(MIMEText(html_body, "html"))
-
-        if self.smtp_host is None:
-            raise ValueError("SMTP host must be configured for email alerts")
-        if self.smtp_username is None:
-            raise ValueError("SMTP username must be configured for email alerts")
-        if self.smtp_password is None:
-            raise ValueError("SMTP password must be configured for email alerts")
-
-        with smtplib.SMTP(
-            self.smtp_host, self.smtp_port, timeout=self.SMTP_TIMEOUT_SECONDS
-        ) as server:
-            server.starttls()
-            server.login(self.smtp_username, self.smtp_password)
-            server.send_message(msg)
-
-        logger.debug(f"Email sent to {len(self.to_emails)} recipients")
-
-    def _get_email_subject(self, classified_error: "AlertableError") -> str:
-        """Generate email subject line."""
-        severity_val = (
-            classified_error.severity.value
-            if hasattr(classified_error.severity, "value")
-            else str(classified_error.severity)
-        )
-        category_val = (
-            classified_error.category.value
-            if hasattr(classified_error.category, "value")
-            else str(classified_error.category)
-        )
-        emoji = "🚨" if severity_val == ErrorSeverity.CRITICAL else "⚠️"
-
-        return (
-            f"{emoji} {self.service_name} Alert: {category_val.title()} "
-            f"({classified_error.provider})"
-        )
-
-    def _create_html_alert(
-        self,
-        classified_error: "AlertableError",
-        alert_message: str,
-    ) -> str:
-        """Create HTML version of alert email."""
-        severity_val = (
-            classified_error.severity.value
-            if hasattr(classified_error.severity, "value")
-            else str(classified_error.severity)
-        )
-        category_val = (
-            classified_error.category.value
-            if hasattr(classified_error.category, "value")
-            else str(classified_error.category)
-        )
-        original_error = getattr(classified_error, "original_error", "")
-
-        color_map = {
-            ErrorSeverity.CRITICAL: "#dc3545",  # Red
-            ErrorSeverity.HIGH: "#fd7e14",  # Orange
-            ErrorSeverity.MEDIUM: "#ffc107",  # Yellow
-            ErrorSeverity.LOW: "#17a2b8",  # Cyan
-        }
-        color = color_map.get(severity_val, "#6c757d")  # type: ignore[call-overload]
-
-        html = f"""
-        <html>
-        <head>
-            <style>
-                body {{
-                    font-family: Arial, sans-serif;
-                    line-height: 1.6;
-                    color: #333;
-                }}
-                .alert-box {{
-                    border-left: 4px solid {color};
-                    padding: 15px;
-                    background-color: #f8f9fa;
-                    margin: 20px 0;
-                }}
-                .severity {{
-                    color: {color};
-                    font-weight: bold;
-                    font-size: 18px;
-                }}
-                .detail {{
-                    margin: 10px 0;
-                }}
-                .label {{
-                    font-weight: bold;
-                }}
-                .actions {{
-                    background-color: #e9ecef;
-                    padding: 15px;
-                    margin-top: 20px;
-                    border-radius: 4px;
-                }}
-                .footer {{
-                    margin-top: 30px;
-                    font-size: 12px;
-                    color: #6c757d;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="alert-box">
-                <div class="severity">{severity_val.upper()} Alert</div>
-                <div class="detail">
-                    <span class="label">Category:</span> {category_val.title()}
-                </div>
-                <div class="detail">
-                    <span class="label">Provider:</span> {html_module.escape(str(classified_error.provider))}
-                </div>
-                <div class="detail">
-                    <span class="label">Time:</span> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
-                </div>
-            </div>
-
-            <div class="detail">
-                <span class="label">Message:</span><br>
-                {html_module.escape(str(classified_error.message))}
-            </div>
-
-            <div class="actions">
-                <div class="label">Recommended Actions:</div>
-                <pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">{alert_message.split('Recommended Actions:')[1] if 'Recommended Actions:' in alert_message else ''}</pre>
-            </div>
-
-            <div class="footer">
-                <p>This is an automated alert from {html_module.escape(self.service_name)}.</p>
-                <p>Original error: {html_module.escape(str(original_error))}</p>
-            </div>
-        </body>
-        </html>
-        """
-        return html
 
     def _write_alert_file(
         self,
