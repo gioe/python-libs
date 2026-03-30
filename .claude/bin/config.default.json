@@ -1,0 +1,46 @@
+{
+  "domains": [],
+  "task_types": ["bug", "feature", "refactor", "test", "docs", "infrastructure", "issue"],
+  "statuses": ["To Do", "In Progress", "Done"],
+  "priorities": ["Highest", "High", "Medium", "Low", "Lowest"],
+  "closed_reasons": ["completed", "expired", "wont_do", "duplicate"],
+  "complexity": ["XS", "S", "M", "L", "XL"],
+  "blocker_types": ["data", "approval", "infra", "external"],
+  "criterion_types": ["manual", "code", "test", "file"],
+  "agents": {},
+  "dupes": {
+    "strip_prefixes": ["Deferred", "Enhancement", "Optional"],
+    "check_threshold": 0.82,
+    "similar_threshold": 0.6
+  },
+  "review": {
+    "mode": "ai_only",
+    "max_passes": 2,
+    "reviewers": [{
+      "name": "general",
+      "description": "Reviews the diff across all quality dimensions: (1) Correctness — logic errors, edge cases, off-by-one errors, missing error handling, race conditions, contradicts acceptance criteria; (2) Security — injection attacks, auth bypass, data exposure, input validation gaps, secrets in code; (3) Readability & Maintainability — unclear naming, functions doing too much, dead code, comments that explain what instead of why; (4) Design — unnecessary coupling, DRY violations, premature abstraction, inconsistency with existing patterns; (5) Tests — missing coverage for new behavior, tests that don't verify the right thing, untested failure paths; (6) Performance — N+1 queries, expensive operations in hot paths, unjustified new dependencies; (7) Operational Concerns — unsafe migrations, insufficient logging for production debugging, missing rollback plan for risky changes."
+    }]
+  },
+  "review_categories": ["must_fix", "suggest", "defer"],
+  "review_severities": ["critical", "major", "minor"],
+  "merge": {
+    "mode": "local"
+  },
+  "issue_scoring": {
+    "factors": {
+      "test_present":   { "yes": 2, "no": -1 },
+      "pillar_aligned": { "yes": 2, "no": -3 },
+      "duplicate":      { "yes": -5, "no": 0 },
+      "in_scope":       { "yes": 1, "no": -3 },
+      "severity_high":  { "yes": 3, "no": 0 },
+      "issue_quality":  { "good": 1, "poor": -2 }
+    },
+    "thresholds": { "address": 4, "decline": 0 }
+  },
+  "test_command": "",
+  "project_type": null,
+  "project_libs": {
+    "python_service": { "repo": "gioe/python-libs", "ref": "main" },
+    "ios_app": { "repo": "gioe/ios-libs", "ref": "main" }
+  }
+}
