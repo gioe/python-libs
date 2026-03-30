@@ -28,6 +28,8 @@ packages = [
     "gioe_libs.domain_types",
     "gioe_libs.structured_logging",
     "gioe_libs.observability",
+    "gioe_libs.rate_limiter",
+    "gioe_libs.rate_limiter.tests",
 ]
 
 [tool.setuptools.package-dir]
