@@ -196,6 +196,9 @@ class CircuitBreaker:
         with self._key_locks[key]:
             self._failure_count.pop(key, None)
             self._opened_at.pop(key, None)
+        # Remove the lock after releasing it so transient keys don't accumulate
+        # Lock objects indefinitely.
         with self._global_lock:
             self._failure_threshold.pop(key, None)
             self._cooldown_seconds.pop(key, None)
+            self._key_locks.pop(key, None)
