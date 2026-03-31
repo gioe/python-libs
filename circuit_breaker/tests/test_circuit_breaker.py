@@ -37,6 +37,7 @@ def clean_circuit_breaker():
     cb._opened_at.clear()
     cb._failure_threshold.clear()
     cb._cooldown_seconds.clear()
+    cb._key_locks.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +282,24 @@ class TestStats:
         assert s["is_open"] is True
         assert s["opened_at"] is not None
         assert s["cooldown_remaining"] > 0
+
+    def test_get_stats_consistent_after_cooldown_auto_reset(self, clean_circuit_breaker):
+        """get_stats() must return an internally consistent snapshot when the
+        cooldown elapses during the call: is_open=False, opened_at=None,
+        cooldown_remaining=None — never a mix of is_open=False with a
+        non-None opened_at."""
+        cb = clean_circuit_breaker
+        cb.configure("stats-reset", failure_threshold=1, cooldown_seconds=0.05)
+        cb.record_failure("stats-reset")
+        assert cb.is_open("stats-reset") is True
+
+        time.sleep(0.1)  # cooldown elapses before get_stats() is called
+
+        stats = cb.get_stats()
+        s = stats["stats-reset"]
+        assert s["is_open"] is False
+        assert s["opened_at"] is None
+        assert s["cooldown_remaining"] is None
 
 
 # ---------------------------------------------------------------------------

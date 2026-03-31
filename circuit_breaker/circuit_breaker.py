@@ -166,8 +166,12 @@ class CircuitBreaker:
         stats: Dict[str, Dict] = {}
         for key in all_keys:
             with self._key_locks[key]:
-                opened_at = self._opened_at.get(key)
+                # Call _check_open first — it may auto-reset _opened_at[key] if
+                # cooldown has elapsed. Capture opened_at afterwards so the
+                # snapshot is internally consistent (is_open, opened_at, and
+                # cooldown_remaining all reflect the same post-check state).
                 is_open = self._check_open(key)
+                opened_at = self._opened_at.get(key)
                 stats[key] = {
                     "is_open": is_open,
                     "failure_count": self._failure_count.get(key, 0),
