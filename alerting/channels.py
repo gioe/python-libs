@@ -160,7 +160,8 @@ class WebhookAlertChannel(AlertChannel):
                 "message": alert.message,
                 "severity": alert.severity.value,
                 "metadata": alert.metadata,
-            }
+            },
+            default=str,
         ).encode("utf-8")
 
         all_headers = {"Content-Type": "application/json", **self.extra_headers}

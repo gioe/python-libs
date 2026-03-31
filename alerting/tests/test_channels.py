@@ -209,6 +209,19 @@ class TestDiscordAlertChannel:
             result = channel.send(Alert(title="T", message="M"))
         assert result is False
 
+    def test_custom_timeout_forwarded_to_urlopen(self):
+        channel = DiscordAlertChannel(webhook_url="https://discord.example/webhook", timeout=3)
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["timeout"] = timeout
+            return MagicMock().__enter__.return_value
+
+        with patch("alerting.channels.urllib.request.urlopen", side_effect=fake_urlopen):
+            channel.send(Alert(title="T", message="M"))
+
+        assert captured.get("timeout") == 3
+
 
 # ---------------------------------------------------------------------------
 # WebhookAlertChannel
@@ -292,6 +305,36 @@ class TestWebhookAlertChannel:
         with patch("alerting.channels.urllib.request.urlopen", side_effect=http_err):
             result = channel.send(Alert(title="T", message="M"))
         assert result is False
+
+    def test_custom_timeout_forwarded_to_urlopen(self):
+        channel = WebhookAlertChannel(url="https://hooks.example/notify", timeout=7)
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["timeout"] = timeout
+            return MagicMock().__enter__.return_value
+
+        with patch("alerting.channels.urllib.request.urlopen", side_effect=fake_urlopen):
+            channel.send(Alert(title="T", message="M"))
+
+        assert captured.get("timeout") == 7
+
+    def test_non_serializable_metadata_does_not_raise(self):
+        from datetime import datetime
+
+        channel = WebhookAlertChannel(url="https://hooks.example/notify")
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["body"] = json.loads(req.data)
+            return MagicMock().__enter__.return_value
+
+        alert = Alert(title="T", message="M", metadata={"ts": datetime(2024, 1, 1)})
+        with patch("alerting.channels.urllib.request.urlopen", side_effect=fake_urlopen):
+            result = channel.send(alert)
+
+        assert result is True
+        assert "ts" in captured["body"]["metadata"]
 
 
 # ---------------------------------------------------------------------------
