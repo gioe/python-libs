@@ -333,3 +333,12 @@ class TestReset:
         # After reset, defaults apply
         assert cb._get_threshold("reset-key") == 5
         assert cb._get_cooldown("reset-key") == 60.0
+
+    def test_reset_removes_key_from_key_locks(self, clean_circuit_breaker):
+        cb = clean_circuit_breaker
+        cb.configure("reset-key", failure_threshold=1, cooldown_seconds=60)
+        cb.record_failure("reset-key")  # ensures _key_locks entry is created
+        assert "reset-key" in cb._key_locks
+
+        cb.reset("reset-key")
+        assert "reset-key" not in cb._key_locks
