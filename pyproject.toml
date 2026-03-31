@@ -32,6 +32,8 @@ packages = [
     "gioe_libs.rate_limiter.tests",
     "gioe_libs.error_handling",
     "gioe_libs.error_handling.tests",
+    "gioe_libs.circuit_breaker",
+    "gioe_libs.circuit_breaker.tests",
 ]
 
 [tool.setuptools.package-dir]
