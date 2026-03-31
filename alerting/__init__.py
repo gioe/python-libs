@@ -11,6 +11,13 @@ from .alerting import (
     AlertError,
     AlertableError,
 )
+from .channels import (
+    AlertChannel,
+    Alert,
+    AlertSeverity,
+    DiscordAlertChannel,
+    WebhookAlertChannel,
+)
 
 __all__ = [
     "ResourceMonitor",
@@ -22,4 +29,9 @@ __all__ = [
     "ErrorSeverity",
     "AlertError",
     "AlertableError",
+    "AlertChannel",
+    "Alert",
+    "AlertSeverity",
+    "DiscordAlertChannel",
+    "WebhookAlertChannel",
 ]
