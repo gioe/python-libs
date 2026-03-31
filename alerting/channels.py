@@ -7,6 +7,7 @@ calls use stdlib urllib.request — no external HTTP library required.
 
 import json
 import logging
+import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -71,7 +72,7 @@ _DISCORD_SEVERITY_COLORS: Dict[AlertSeverity, int] = {
     AlertSeverity.CRITICAL: 0xFF0000, # red
 }
 
-_DISCORD_HTTP_TIMEOUT = 10
+_DEFAULT_HTTP_TIMEOUT = 10
 
 
 class DiscordAlertChannel(AlertChannel):
@@ -84,7 +85,7 @@ class DiscordAlertChannel(AlertChannel):
         timeout: HTTP request timeout in seconds (default: 10).
     """
 
-    def __init__(self, webhook_url: str, timeout: int = _DISCORD_HTTP_TIMEOUT) -> None:
+    def __init__(self, webhook_url: str, timeout: int = _DEFAULT_HTTP_TIMEOUT) -> None:
         self.webhook_url = webhook_url
         self.timeout = timeout
 
@@ -112,6 +113,11 @@ class DiscordAlertChannel(AlertChannel):
             with urllib.request.urlopen(req, timeout=self.timeout):
                 pass  # Discord returns 204 No Content on success
             return True
+        except urllib.error.HTTPError as exc:
+            logger.warning(
+                "DiscordAlertChannel: HTTP %s %s", exc.code, exc.reason, exc_info=True
+            )
+            return False
         except Exception:
             logger.warning("DiscordAlertChannel: failed to send alert", exc_info=True)
             return False
@@ -141,7 +147,7 @@ class WebhookAlertChannel(AlertChannel):
         self,
         url: str,
         headers: Optional[Dict[str, str]] = None,
-        timeout: int = _DISCORD_HTTP_TIMEOUT,
+        timeout: int = _DEFAULT_HTTP_TIMEOUT,
     ) -> None:
         self.url = url
         self.extra_headers = headers or {}
@@ -168,6 +174,11 @@ class WebhookAlertChannel(AlertChannel):
             with urllib.request.urlopen(req, timeout=self.timeout):
                 pass
             return True
+        except urllib.error.HTTPError as exc:
+            logger.warning(
+                "WebhookAlertChannel: HTTP %s %s", exc.code, exc.reason, exc_info=True
+            )
+            return False
         except Exception:
             logger.warning("WebhookAlertChannel: failed to send alert", exc_info=True)
             return False

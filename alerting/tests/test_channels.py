@@ -2,6 +2,7 @@
 DiscordAlertChannel, WebhookAlertChannel."""
 
 import json
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -195,6 +196,19 @@ class TestDiscordAlertChannel:
 
         assert captured["ct"] == "application/json"
 
+    def test_http_error_returns_false(self):
+        channel = DiscordAlertChannel(webhook_url="https://discord.example/webhook")
+        http_err = urllib.error.HTTPError(
+            url="https://discord.example/webhook",
+            code=400,
+            msg="Bad Request",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+        with patch("alerting.channels.urllib.request.urlopen", side_effect=http_err):
+            result = channel.send(Alert(title="T", message="M"))
+        assert result is False
+
 
 # ---------------------------------------------------------------------------
 # WebhookAlertChannel
@@ -265,6 +279,19 @@ class TestWebhookAlertChannel:
             channel.send(Alert(title="T", message="M"))
 
         assert captured["method"] == "POST"
+
+    def test_http_error_returns_false(self):
+        channel = WebhookAlertChannel(url="https://hooks.example/notify")
+        http_err = urllib.error.HTTPError(
+            url="https://hooks.example/notify",
+            code=401,
+            msg="Unauthorized",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+        with patch("alerting.channels.urllib.request.urlopen", side_effect=http_err):
+            result = channel.send(Alert(title="T", message="M"))
+        assert result is False
 
 
 # ---------------------------------------------------------------------------
