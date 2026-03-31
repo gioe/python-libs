@@ -73,6 +73,11 @@ class CircuitBreaker:
         # Guards config reads/writes and get_stats
         self._global_lock = threading.Lock()
 
+        # Lock-ordering convention: when both _global_lock and a _key_locks[key]
+        # must be held simultaneously, ALWAYS acquire _global_lock first, then
+        # _key_locks[key].  Acquiring in the reverse order risks deadlock if two
+        # threads each hold one of the locks while waiting for the other.
+
         self._initialized = True
 
     # ------------------------------------------------------------------
@@ -192,13 +197,18 @@ class CircuitBreaker:
     # ------------------------------------------------------------------
 
     def reset(self, key: str) -> None:
-        """Clear all circuit-breaker state for *key*, including configuration."""
-        with self._key_locks[key]:
-            self._failure_count.pop(key, None)
-            self._opened_at.pop(key, None)
-        # Remove the lock after releasing it so transient keys don't accumulate
-        # Lock objects indefinitely.
+        """Clear all circuit-breaker state for *key*, including configuration.
+
+        Acquires _global_lock before _key_locks[key] per the lock-ordering
+        convention documented in __init__.
+        """
+        # _global_lock first, then _key_locks[key] — per convention.
         with self._global_lock:
+            with self._key_locks[key]:
+                self._failure_count.pop(key, None)
+                self._opened_at.pop(key, None)
+            # Remove the lock entry after releasing it so transient keys don't
+            # accumulate Lock objects indefinitely.
             self._failure_threshold.pop(key, None)
             self._cooldown_seconds.pop(key, None)
             self._key_locks.pop(key, None)
