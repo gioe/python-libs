@@ -379,6 +379,28 @@ class TestClearTiming:
         rl.clear_timing("ct-other-a")
         assert rl._get_rps("ct-other-b") == 7.0
 
+    @pytest.mark.asyncio
+    async def test_clear_timing_enforces_original_rps_not_default(self):
+        """Regression: clear_timing must not drop configured RPS to the 1.0 default.
+
+        After clear_timing(), await_if_needed must still throttle at the
+        originally-configured rate — not at the 1.0 default that would apply
+        if the RPS config were accidentally discarded.
+        """
+        rl = RateLimiter()
+        key = "ct-enforce-rps"
+        rl.configure(key, 10.0)  # 100 ms interval; 1.0 default would be 1000 ms
+        await rl.await_if_needed(key)
+        rl.clear_timing(key)
+        # Simulate a fresh request arriving immediately after reset
+        rl._last_request[key] = time.time()
+        start = time.time()
+        await rl.await_if_needed(key)
+        elapsed = time.time() - start
+        # Should wait ~100 ms (10 RPS), not ~1000 ms (1 RPS default)
+        assert elapsed >= 0.08, f"waited only {elapsed:.3f}s — RPS enforcement lost?"
+        assert elapsed < 0.5, f"waited {elapsed:.3f}s — RPS may have fallen back to 1.0"
+
 
 # ---------------------------------------------------------------------------
 # Concurrency
