@@ -312,6 +312,75 @@ class TestReset:
 
 
 # ---------------------------------------------------------------------------
+# clear_timing
+# ---------------------------------------------------------------------------
+
+
+class TestClearTiming:
+    @pytest.mark.asyncio
+    async def test_clear_timing_preserves_rps(self):
+        rl = RateLimiter()
+        key = "ct-rps"
+        rl.configure(key, 5.0)
+        await rl.await_if_needed(key)
+        rl.record_error(key)
+        rl.clear_timing(key)
+        assert rl._get_rps(key) == 5.0
+
+    @pytest.mark.asyncio
+    async def test_clear_timing_clears_last_request(self):
+        rl = RateLimiter()
+        key = "ct-lr"
+        rl.configure(key, 100.0)
+        await rl.await_if_needed(key)
+        assert key in rl._last_request
+        rl.clear_timing(key)
+        assert key not in rl._last_request
+
+    def test_clear_timing_clears_consecutive_errors(self):
+        rl = RateLimiter()
+        key = "ct-err"
+        rl.configure(key, 2.0)
+        rl.record_error(key)
+        rl.record_error(key)
+        rl.clear_timing(key)
+        assert rl._consecutive_errors.get(key, 0) == 0
+
+    def test_clear_timing_clears_total_requests(self):
+        rl = RateLimiter()
+        key = "ct-total"
+        rl.configure(key, 2.0)
+        rl._total_requests[key] = 4
+        rl.clear_timing(key)
+        assert rl._total_requests.get(key, 0) == 0
+
+    @pytest.mark.asyncio
+    async def test_clear_timing_noop_for_unknown_key(self):
+        rl = RateLimiter()
+        rl.clear_timing("ct-unknown")  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_new_call_after_clear_timing_does_not_wait(self):
+        rl = RateLimiter()
+        key = "ct-nowait"
+        rl.configure(key, 10.0)
+        await rl.await_if_needed(key)
+        rl.clear_timing(key)
+        start = time.time()
+        await rl.await_if_needed(key)
+        assert time.time() - start < 0.05
+
+    @pytest.mark.asyncio
+    async def test_clear_timing_does_not_affect_other_keys(self):
+        rl = RateLimiter()
+        rl.configure("ct-other-a", 3.0)
+        rl.configure("ct-other-b", 7.0)
+        rl.record_error("ct-other-a")
+        rl.clear_timing("ct-other-a")
+        assert rl._get_rps("ct-other-b") == 7.0
+
+
+# ---------------------------------------------------------------------------
 # Concurrency
 # ---------------------------------------------------------------------------
 
