@@ -34,6 +34,8 @@ packages = [
     "gioe_libs.error_handling.tests",
     "gioe_libs.circuit_breaker",
     "gioe_libs.circuit_breaker.tests",
+    "gioe_libs.string_utils",
+    "gioe_libs.string_utils.tests",
 ]
 
 [tool.setuptools.package-dir]
