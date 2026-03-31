@@ -175,8 +175,27 @@ class RateLimiter:
     # Reset
     # ------------------------------------------------------------------
 
+    def clear_timing(self, key: str) -> None:
+        """Clear timing and error state for *key* while preserving RPS config.
+
+        Use this when you want to reset a key's history (last_request,
+        consecutive_errors, total_requests) without discarding the configured
+        RPS limit — e.g. after a domain-level reset in a consuming service.
+        """
+        with self._key_locks[key]:
+            self._last_request.pop(key, None)
+        with self._global_lock:
+            self._consecutive_errors.pop(key, None)
+            self._total_requests.pop(key, None)
+
     def reset(self, key: str) -> None:
-        """Clear all rate-limiting state for *key*."""
+        """Clear all rate-limiting state for *key*, including RPS config.
+
+        This is a full teardown: timing state, error counters, and the
+        configured RPS limit are all removed.  Subsequent calls will fall
+        back to the default RPS (1.0).  Use clear_timing() instead if you
+        want to preserve the configured RPS while resetting timing state.
+        """
         with self._key_locks[key]:
             self._last_request.pop(key, None)
         with self._global_lock:
