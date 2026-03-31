@@ -30,6 +30,8 @@ packages = [
     "gioe_libs.observability",
     "gioe_libs.rate_limiter",
     "gioe_libs.rate_limiter.tests",
+    "gioe_libs.error_handling",
+    "gioe_libs.error_handling.tests",
 ]
 
 [tool.setuptools.package-dir]
