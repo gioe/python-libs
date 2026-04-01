@@ -12,7 +12,7 @@ import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class Alert:
     title: str
     message: str
     severity: AlertSeverity = AlertSeverity.MEDIUM
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AlertChannel(ABC):
@@ -65,7 +65,7 @@ class AlertChannel(ABC):
 # Discord embed color map
 # ---------------------------------------------------------------------------
 
-_DISCORD_SEVERITY_COLORS: Dict[AlertSeverity, int] = {
+_DISCORD_SEVERITY_COLORS: dict[AlertSeverity, int] = {
     AlertSeverity.LOW: 0x00FF00,      # green
     AlertSeverity.MEDIUM: 0xFFFF00,   # yellow
     AlertSeverity.HIGH: 0xFF8800,     # orange
@@ -91,7 +91,7 @@ class DiscordAlertChannel(AlertChannel):
 
     def send(self, alert: Alert) -> bool:
         color = _DISCORD_SEVERITY_COLORS.get(alert.severity, 0x808080)
-        embed: Dict[str, Any] = {
+        embed: dict[str, Any] = {
             "title": alert.title,
             "description": alert.message,
             "color": color,
@@ -146,7 +146,7 @@ class WebhookAlertChannel(AlertChannel):
     def __init__(
         self,
         url: str,
-        headers: Optional[Dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
         timeout: int = _DEFAULT_HTTP_TIMEOUT,
     ) -> None:
         self.url = url
