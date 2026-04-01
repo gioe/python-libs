@@ -15,6 +15,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -244,13 +245,36 @@ def _normalize_hook_cmd(cmd: str) -> str:
 
     Strips the $CLAUDE_PROJECT_DIR/ prefix (written by current install) and
     leading ./ (written by older installs) so that both path forms compare equal.
+    Also handles the git-root-resolved wrapper form written by some older installs:
+        bash -c 'R=$(git rev-parse ...); exec "$R/.claude/hooks/foo.sh"'
+    extracts the .claude/hooks/<name> portion so it compares equal to the plain-path form.
     """
     prefix = "$CLAUDE_PROJECT_DIR/"
     if cmd.startswith(prefix):
         return cmd[len(prefix):]
     if cmd.startswith("./"):
         return cmd[2:]
+    m = re.search(r'exec "\$R/(.claude/hooks/[^"\']+)"', cmd)
+    if m:
+        return m.group(1)
     return cmd
+
+
+def _dedup_hook_groups(groups: list) -> list:
+    """Remove duplicate hook groups, keeping the first occurrence of each normalized command."""
+    seen: set = set()
+    deduped = []
+    for group in groups:
+        commands = [
+            _normalize_hook_cmd(h.get("command", ""))
+            for h in group.get("hooks", [])
+            if h.get("command")
+        ]
+        if any(cmd in seen for cmd in commands):
+            continue
+        deduped.append(group)
+        seen.update(commands)
+    return deduped
 
 
 def merge_hook_registrations(src: str, repo_root: str) -> None:
@@ -279,6 +303,14 @@ def merge_hook_registrations(src: str, repo_root: str) -> None:
         target_settings = {}
 
     target_hooks = target_settings.setdefault("hooks", {})
+
+    # Dedup pass: remove duplicate hook groups already present in target settings
+    for event_type in list(target_hooks.keys()):
+        before = len(target_hooks[event_type])
+        target_hooks[event_type] = _dedup_hook_groups(target_hooks[event_type])
+        removed = before - len(target_hooks[event_type])
+        if removed:
+            print(f"  Removed {removed} duplicate hook group(s) from {event_type}")
 
     for event_type, source_groups in source_hooks.items():
         target_groups = target_hooks.setdefault(event_type, [])
