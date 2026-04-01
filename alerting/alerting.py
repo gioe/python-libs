@@ -19,6 +19,8 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime
 
 import yaml
 
+from .channels import AlertSeverity as ErrorSeverity  # noqa: F401 — canonical alias
+
 
 def _format_value(value: Any) -> str:
     """Format a notification field value as a human-readable string."""
@@ -54,14 +56,6 @@ class ErrorCategory(str, Enum):
     SCRIPT_FAILURE = "script_failure"  # A script or batch process failed
     UNKNOWN = "unknown"  # Unclassified errors
 
-
-class ErrorSeverity(str, Enum):
-    """Severity levels for errors."""
-
-    CRITICAL = "critical"  # Requires immediate attention (e.g., billing)
-    HIGH = "high"  # Important but not blocking (e.g., rate limits)
-    MEDIUM = "medium"  # Should be addressed (e.g., invalid requests)
-    LOW = "low"  # Informational (e.g., temporary network issues)
 
 
 # ---------------------------------------------------------------------------
