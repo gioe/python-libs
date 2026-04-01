@@ -34,7 +34,7 @@ pip install -e ".[observability]"
 
 ## Architecture
 
-The library is organized into independent modules under `gioe_libs/`:
+Modules live as top-level directories (e.g. `alerting/`, `observability/`). `pyproject.toml` maps the `gioe_libs` package root to `.`, so they import as `gioe_libs.alerting`, `gioe_libs.observability`, etc.
 
 ### `observability/` — Unified Observability Facade (largest, most complex)
 Implements the **facade pattern**: application code imports a single `observability` singleton and calls a unified API. Internally routes signals to Sentry and/or OpenTelemetry.
@@ -60,6 +60,18 @@ Thin wrapper (`CronJob`) that wires logging, observability, alerting, and heartb
 ### `domain_types/` — Shared Domain Enums
 Generic, project-agnostic enums reusable across unrelated services: `DifficultyLevel`, `SessionStatus`, `AsyncRunStatus`, `FeedbackStatus`. No business logic. Application-specific enums (e.g. `QuestionType`, `TestStatus`, `NotificationType`, `EducationLevel`, `FeedbackCategory`) belong in the consuming application, not here.
 
+### `circuit_breaker/` — Per-Key Circuit Breaker
+Singleton `CircuitBreaker` tracks failure rates on arbitrary string keys. Opens the circuit when a configurable `failure_threshold` is exceeded and auto-resets after `cooldown_seconds`. Thread-safe via per-key `threading.Lock`.
+
+### `rate_limiter/` — Per-Key Rate Limiter
+Singleton `RateLimiter` enforces RPS-based limits on arbitrary string keys. Sync (`wait_if_needed`) and async (`await_if_needed`) paths — the async path uses `asyncio.sleep` and never blocks the event loop. Thread-safe via per-key `threading.Lock`.
+
+### `error_handling/` — Retry with Exponential Backoff
+`ErrorHandler` provides async retry execution with smart error classification: no retry on 4xx, `Retry-After` support for rate-limit errors, retry-once for data errors. `RetryConfig` controls backoff parameters.
+
+### `string_utils/` — String Utilities
+Pure string manipulation with no domain dependencies (`StringUtils` class with static methods). Includes ZIP code validation, URL validation, and alphanumeric stripping.
+
 ## Key Patterns
 
 - **Configuration-driven**: YAML configs with `${VAR:default}` env substitution used across observability, alerting, and cron modules
@@ -69,7 +81,7 @@ Generic, project-agnostic enums reusable across unrelated services: `DifficultyL
 
 ## Tests
 
-Test files live in `*/tests/` within each module. The `observability/` module has its own `pytest.ini` defining `integration` and `slow` markers. No root-level conftest.
+Test files live in `*/tests/` within each module. `integration` and `slow` markers are defined in `pyproject.toml`. No root-level conftest.
 
 > **Dev setup:** Run `pip install -e ".[observability]"` before running the full test suite. Without the observability extras, 27+ tests will fail with `No module named opentelemetry`.
 
