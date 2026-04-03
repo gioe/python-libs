@@ -9,8 +9,11 @@ imported by any service that sets PYTHONPATH to include the repo root.
 
 import json
 import logging
+import ssl
 import time
 import urllib.request
+
+import certifi
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -232,7 +235,7 @@ class AlertManager:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.DISCORD_HTTP_TIMEOUT):
+            with urllib.request.urlopen(req, timeout=self.DISCORD_HTTP_TIMEOUT, context=ssl.create_default_context(cafile=certifi.where())):
                 pass  # Discord returns 204 No Content on success
             return True
         except Exception as exc:

@@ -7,12 +7,15 @@ calls use stdlib urllib.request — no external HTTP library required.
 
 import json
 import logging
+import ssl
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+import certifi
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +113,7 @@ class DiscordAlertChannel(AlertChannel):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout):
+            with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context(cafile=certifi.where())):
                 pass  # Discord returns 204 No Content on success
             return True
         except urllib.error.HTTPError as exc:
@@ -172,7 +175,7 @@ class WebhookAlertChannel(AlertChannel):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout):
+            with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context(cafile=certifi.where())):
                 pass
             return True
         except urllib.error.HTTPError as exc:
