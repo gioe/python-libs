@@ -2,9 +2,11 @@
 DiscordAlertChannel, WebhookAlertChannel."""
 
 import json
+import ssl
 import urllib.error
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
+import certifi
 import pytest
 
 from alerting.channels import (
@@ -127,7 +129,7 @@ class TestDiscordAlertChannel:
         channel = DiscordAlertChannel(webhook_url="https://discord.example/webhook")
         captured = {}
 
-        def fake_urlopen(req, timeout):
+        def fake_urlopen(req, timeout, context=None):
             captured["body"] = json.loads(req.data.decode())
             return _make_mock_urlopen()
 
@@ -143,7 +145,7 @@ class TestDiscordAlertChannel:
         for severity in AlertSeverity:
             captured = {}
 
-            def fake_urlopen(req, timeout, sev=severity):
+            def fake_urlopen(req, timeout, context=None, sev=severity):
                 captured["color"] = json.loads(req.data.decode())["embeds"][0]["color"]
                 return _make_mock_urlopen()
 
@@ -158,7 +160,7 @@ class TestDiscordAlertChannel:
         channel = DiscordAlertChannel(webhook_url="https://discord.example/webhook")
         captured = {}
 
-        def fake_urlopen(req, timeout):
+        def fake_urlopen(req, timeout, context=None):
             captured["body"] = json.loads(req.data.decode())
             return _make_mock_urlopen()
 
@@ -174,7 +176,7 @@ class TestDiscordAlertChannel:
         channel = DiscordAlertChannel(webhook_url="https://discord.example/webhook")
         captured = {}
 
-        def fake_urlopen(req, timeout):
+        def fake_urlopen(req, timeout, context=None):
             captured["method"] = req.method
             return _make_mock_urlopen()
 
@@ -187,7 +189,7 @@ class TestDiscordAlertChannel:
         channel = DiscordAlertChannel(webhook_url="https://discord.example/webhook")
         captured = {}
 
-        def fake_urlopen(req, timeout):
+        def fake_urlopen(req, timeout, context=None):
             captured["ct"] = req.get_header("Content-type")
             return _make_mock_urlopen()
 
@@ -213,7 +215,7 @@ class TestDiscordAlertChannel:
         channel = DiscordAlertChannel(webhook_url="https://discord.example/webhook", timeout=3)
         captured = {}
 
-        def fake_urlopen(req, timeout=None):
+        def fake_urlopen(req, timeout=None, context=None):
             captured["timeout"] = timeout
             return MagicMock().__enter__.return_value
 
@@ -221,6 +223,22 @@ class TestDiscordAlertChannel:
             channel.send(Alert(title="T", message="M"))
 
         assert captured.get("timeout") == 3
+
+    def test_ssl_context_uses_certifi(self):
+        channel = DiscordAlertChannel(webhook_url="https://discord.example/webhook")
+        real_ctx = ssl.create_default_context()
+        captured = {}
+
+        def fake_urlopen(req, timeout=None, context=None):
+            captured["context"] = context
+            return _make_mock_urlopen()
+
+        with patch("alerting.channels.ssl.create_default_context", return_value=real_ctx) as mock_ctx, \
+             patch("alerting.channels.urllib.request.urlopen", side_effect=fake_urlopen):
+            channel.send(Alert(title="T", message="M"))
+
+        mock_ctx.assert_called_once_with(cafile=certifi.where())
+        assert captured.get("context") is real_ctx, "urlopen must receive the SSLContext from create_default_context"
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +263,7 @@ class TestWebhookAlertChannel:
         channel = WebhookAlertChannel(url="https://hooks.example/notify")
         captured = {}
 
-        def fake_urlopen(req, timeout):
+        def fake_urlopen(req, timeout, context=None):
             captured["body"] = json.loads(req.data.decode())
             return _make_mock_urlopen()
 
@@ -271,7 +289,7 @@ class TestWebhookAlertChannel:
         )
         captured = {}
 
-        def fake_urlopen(req, timeout):
+        def fake_urlopen(req, timeout, context=None):
             captured["key"] = req.get_header("X-api-key")
             return _make_mock_urlopen()
 
@@ -284,7 +302,7 @@ class TestWebhookAlertChannel:
         channel = WebhookAlertChannel(url="https://hooks.example/notify")
         captured = {}
 
-        def fake_urlopen(req, timeout):
+        def fake_urlopen(req, timeout, context=None):
             captured["method"] = req.method
             return _make_mock_urlopen()
 
@@ -310,7 +328,7 @@ class TestWebhookAlertChannel:
         channel = WebhookAlertChannel(url="https://hooks.example/notify", timeout=7)
         captured = {}
 
-        def fake_urlopen(req, timeout=None):
+        def fake_urlopen(req, timeout=None, context=None):
             captured["timeout"] = timeout
             return MagicMock().__enter__.return_value
 
@@ -319,13 +337,29 @@ class TestWebhookAlertChannel:
 
         assert captured.get("timeout") == 7
 
+    def test_ssl_context_uses_certifi(self):
+        channel = WebhookAlertChannel(url="https://hooks.example/notify")
+        real_ctx = ssl.create_default_context()
+        captured = {}
+
+        def fake_urlopen(req, timeout=None, context=None):
+            captured["context"] = context
+            return _make_mock_urlopen()
+
+        with patch("alerting.channels.ssl.create_default_context", return_value=real_ctx) as mock_ctx, \
+             patch("alerting.channels.urllib.request.urlopen", side_effect=fake_urlopen):
+            channel.send(Alert(title="T", message="M"))
+
+        mock_ctx.assert_called_once_with(cafile=certifi.where())
+        assert captured.get("context") is real_ctx, "urlopen must receive the SSLContext from create_default_context"
+
     def test_non_serializable_metadata_does_not_raise(self):
         from datetime import datetime
 
         channel = WebhookAlertChannel(url="https://hooks.example/notify")
         captured = {}
 
-        def fake_urlopen(req, timeout=None):
+        def fake_urlopen(req, timeout=None, context=None):
             captured["body"] = json.loads(req.data)
             return MagicMock().__enter__.return_value
 
