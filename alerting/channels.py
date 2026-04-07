@@ -76,6 +76,7 @@ _DISCORD_SEVERITY_COLORS: dict[AlertSeverity, int] = {
 }
 
 _DEFAULT_HTTP_TIMEOUT = 10
+_DEFAULT_USER_AGENT = "gioe-libs/1.0"
 
 
 class DiscordAlertChannel(AlertChannel):
@@ -109,7 +110,7 @@ class DiscordAlertChannel(AlertChannel):
         req = urllib.request.Request(
             url=self.webhook_url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": _DEFAULT_USER_AGENT},
             method="POST",
         )
         try:
@@ -167,7 +168,7 @@ class WebhookAlertChannel(AlertChannel):
             default=str,
         ).encode("utf-8")
 
-        all_headers = {"Content-Type": "application/json", **self.extra_headers}
+        all_headers = {"Content-Type": "application/json", "User-Agent": _DEFAULT_USER_AGENT, **self.extra_headers}
         req = urllib.request.Request(
             url=self.url,
             data=payload,
