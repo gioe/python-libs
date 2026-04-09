@@ -520,21 +520,50 @@ class AlertManager:
         details: Dict[str, Any] = run_summary.get("details", {})
         generated = run_summary.get("generated")
         inserted = run_summary.get("inserted")
+        errors = run_summary.get("errors", 0)
         duration_seconds = run_summary.get("duration_seconds")
         questions_requested = details.get("questions_requested")
         duplicates_found = details.get("duplicates_found")
         approval_rate = details.get("approval_rate")
         by_type: Dict[str, int] = details.get("by_type", {})
         by_difficulty: Dict[str, int] = details.get("by_difficulty", {})
+        error_message = run_summary.get("error_message")
+        generation_loss_warning = details.get("generation_loss_warning")
 
-        description = (
-            f"Run completed in {duration_seconds:.1f}s"
+        # Build a pipeline funnel description
+        funnel_parts = []
+        if questions_requested is not None:
+            funnel_parts.append(f"Requested **{questions_requested}**")
+        if generated is not None:
+            funnel_parts.append(f"generated **{generated}**")
+        if approval_rate is not None and generated is not None:
+            approved = round(generated * approval_rate / 100) if approval_rate else 0
+            funnel_parts.append(f"approved **{approved}**")
+        if duplicates_found:
+            funnel_parts.append(f"deduped **{duplicates_found}**")
+        if inserted is not None:
+            funnel_parts.append(f"inserted **{inserted}**")
+
+        if funnel_parts:
+            funnel_line = " → ".join(funnel_parts)
+        else:
+            funnel_line = ""
+
+        duration_line = (
+            f"Completed in **{duration_seconds:.1f}s**"
             if duration_seconds is not None
             else "Run completed"
         )
+        desc_parts = [duration_line]
+        if funnel_line:
+            desc_parts.append(funnel_line)
+        if error_message:
+            desc_parts.append(f"**Error:** {error_message}")
+        description = "\n".join(desc_parts)
 
         fields: List[Dict[str, Any]] = []
 
+        # --- Row 1: core counts ---
         if generated is not None:
             if questions_requested:
                 pct = int(generated / questions_requested * 100)
@@ -547,17 +576,20 @@ class AlertManager:
         if inserted is not None:
             fields.append({"name": "Inserted", "value": str(inserted), "inline": True})
 
-        if approval_rate is not None and generated is not None:
-            approved = round(generated * approval_rate / 100) if approval_rate else 0
-            fields.append(
-                {"name": "Approved", "value": f"{approved} / {generated} ({approval_rate:.1f}%)", "inline": True}
-            )
-        elif approval_rate is not None:
+        if approval_rate is not None:
             fields.append({"name": "Approval Rate", "value": f"{approval_rate:.1f}%", "inline": True})
 
-        if duplicates_found is not None:
-            fields.append({"name": "Duplicates", "value": f"{duplicates_found} found", "inline": True})
+        # --- Row 2: quality signals ---
+        if errors:
+            fields.append({"name": "Rejected", "value": str(errors), "inline": True})
 
+        if duplicates_found is not None:
+            fields.append({"name": "Duplicates", "value": str(duplicates_found), "inline": True})
+
+        if generation_loss_warning:
+            fields.append({"name": "⚠️ Generation Loss", "value": generation_loss_warning, "inline": True})
+
+        # --- Row 3: breakdowns ---
         if by_type:
             fields.append(
                 {"name": "By Type", "value": ", ".join(f"{k}: {v}" for k, v in sorted(by_type.items())), "inline": False}
@@ -565,7 +597,7 @@ class AlertManager:
 
         if by_difficulty:
             fields.append(
-                {"name": "By Difficulty", "value": " \u00b7 ".join(f"{k}: {v}" for k, v in sorted(by_difficulty.items())), "inline": False}
+                {"name": "By Difficulty", "value": " · ".join(f"{k}: {v}" for k, v in sorted(by_difficulty.items())), "inline": False}
             )
 
         return title, description, color, fields
