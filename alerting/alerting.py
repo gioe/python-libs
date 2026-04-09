@@ -231,7 +231,7 @@ class AlertManager:
         req = urllib.request.Request(
             url=self.discord_webhook_url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": "gioe-libs/1.0"},
             method="POST",
         )
         try:
