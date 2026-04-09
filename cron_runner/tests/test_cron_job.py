@@ -104,16 +104,15 @@ def test_run_once_happy_path_metrics_recorded(tmp_path: Path) -> None:
 
 
 def test_run_once_happy_path_alert_sent(tmp_path: Path) -> None:
-    """alert_manager.send_notification() is called on success."""
+    """alert_manager.send_run_completion() is called on success."""
     alert_manager = MagicMock()
     with patch("cron_runner.cron_job.setup_logging"):
         job = _make_job(tmp_path, alert_manager=alert_manager)
         job.run_once()
 
-    alert_manager.send_notification.assert_called_once()
-    _, kwargs = alert_manager.send_notification.call_args
-    assert kwargs["severity"] == "info"
-    assert "Success" in kwargs["title"]
+    alert_manager.send_run_completion.assert_called_once()
+    _, kwargs = alert_manager.send_run_completion.call_args
+    assert kwargs["exit_code"] == 0
 
 
 def test_run_once_happy_path_no_alert_when_not_configured(tmp_path: Path) -> None:
@@ -124,7 +123,7 @@ def test_run_once_happy_path_no_alert_when_not_configured(tmp_path: Path) -> Non
 
 
 def test_run_once_captures_run_summary_in_alert(tmp_path: Path) -> None:
-    """run_summary returned by work_fn is converted to fields for send_notification."""
+    """run_summary returned by work_fn is forwarded to send_run_completion."""
     summary = {"generated": 42, "inserted": 40, "errors": 2}
     alert_manager = MagicMock()
     with patch("cron_runner.cron_job.setup_logging"):
@@ -135,11 +134,12 @@ def test_run_once_captures_run_summary_in_alert(tmp_path: Path) -> None:
         )
         job.run_once()
 
-    _, kwargs = alert_manager.send_notification.call_args
-    field_labels = [label for label, _ in kwargs["fields"]]
-    assert "Generated" in field_labels
-    assert "Inserted" in field_labels
-    assert "Duration Seconds" in field_labels
+    _, kwargs = alert_manager.send_run_completion.call_args
+    rs = kwargs["run_summary"]
+    assert rs["generated"] == 42
+    assert rs["inserted"] == 40
+    assert rs["errors"] == 2
+    assert "duration_seconds" in rs
 
 
 def test_run_once_heartbeat_stats_excludes_duration_seconds(tmp_path: Path) -> None:
@@ -248,7 +248,7 @@ def test_run_once_failure_path_metrics_still_recorded(tmp_path: Path) -> None:
 
 
 def test_run_once_failure_path_alert_sent_with_error(tmp_path: Path) -> None:
-    """send_notification is called with severity='critical' when work_fn raises."""
+    """send_run_completion is called with exit_code=1 when work_fn raises."""
 
     def failing_fn():
         raise RuntimeError("critical failure")
@@ -258,13 +258,10 @@ def test_run_once_failure_path_alert_sent_with_error(tmp_path: Path) -> None:
         job = _make_job(tmp_path, work_fn=failing_fn, alert_manager=alert_manager)
         job.run_once()
 
-    alert_manager.send_notification.assert_called_once()
-    _, kwargs = alert_manager.send_notification.call_args
-    assert kwargs["severity"] == "critical"
-    assert "Failed" in kwargs["title"]
-
-    field_map = dict(kwargs["fields"])
-    assert field_map.get("Error Message") == "critical failure"
+    alert_manager.send_run_completion.assert_called_once()
+    _, kwargs = alert_manager.send_run_completion.call_args
+    assert kwargs["exit_code"] == 1
+    assert kwargs["run_summary"]["error_message"] == "critical failure"
 
 
 # ---------------------------------------------------------------------------

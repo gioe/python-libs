@@ -168,7 +168,7 @@ class CronJob:
         4. On exception: calls observability.capture_error() and records the
            failure in the run summary.
         5. Records job.duration (histogram) and job.exit_code (gauge) metrics.
-        6. Calls alert_manager.send_notification() if an alert_manager is set.
+        6. Calls alert_manager.send_run_completion() if an alert_manager is set.
         7. Writes a "completed" or "failed" heartbeat.
 
         Returns:
@@ -215,16 +215,9 @@ class CronJob:
 
             if self.alert_manager is not None:
                 alert_summary = {**run_summary, "duration_seconds": duration}
-                if exit_code == 0:
-                    notif_title = f"\u2705 {self.name}: Success"
-                    notif_severity = "info"
-                else:
-                    notif_title = f"\u274c {self.name}: Failed (exit {exit_code})"
-                    notif_severity = "critical"
-                self.alert_manager.send_notification(
-                    title=notif_title,
-                    fields=_run_summary_to_fields(alert_summary),
-                    severity=notif_severity,
+                self.alert_manager.send_run_completion(
+                    exit_code=exit_code,
+                    run_summary=alert_summary,
                 )
 
             heartbeat_status = "completed" if exit_code == 0 else "failed"
