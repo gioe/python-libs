@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gioe-libs"
-version = "0.1.0"
+version = "0.1.1"
 description = "Shared Python libraries for common service patterns (logging, alerting, observability, cron)"
 requires-python = ">=3.11"
 dependencies = [
