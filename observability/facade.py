@@ -620,8 +620,23 @@ class ObservabilityFacade:
 
         Called automatically when the Python interpreter exits.
         Flushes pending data and shuts down backends gracefully.
+
+        During interpreter shutdown — and inside pytest's stdio-capture
+        teardown — the streams attached to ``logging`` handlers may already
+        be closed by the time atexit runs. Without intervention, any log
+        emission here triggers ``logging.Handler.handleError`` which prints
+        a "I/O operation on closed file" traceback to stderr after the test
+        summary. ``logging.raiseExceptions`` is toggled off for the duration
+        of the call so the emission silently no-ops, and restored in
+        ``finally`` so application logging behavior outside atexit is
+        unaffected.
         """
-        if self._initialized:
+        if not self._initialized:
+            return
+
+        prev_raise = logging.raiseExceptions
+        logging.raiseExceptions = False
+        try:
             logger.debug("Observability atexit shutdown triggered")
             try:
                 self.flush(timeout=2.0)
@@ -631,6 +646,8 @@ class ObservabilityFacade:
                 self.shutdown()
             except Exception as e:
                 logger.debug("Error during atexit shutdown: %s", e)
+        finally:
+            logging.raiseExceptions = prev_raise
 
     def capture_error(
         self,
