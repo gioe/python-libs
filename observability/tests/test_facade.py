@@ -211,6 +211,46 @@ class TestObservabilityFacadeAtexitShutdown:
         mock_sentry.flush.assert_not_called()
         mock_sentry.shutdown.assert_not_called()
 
+    def test_atexit_shutdown_suppresses_logging_errors_when_stdio_closed(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Reproduces the post-pytest "I/O operation on closed file" noise.
+
+        When atexit fires after pytest's capture has closed the StreamHandler's
+        underlying stream, ``logging.Handler.handleError`` would otherwise print
+        a traceback to stderr. The fix toggles ``logging.raiseExceptions`` for
+        the duration of the call. This test attaches a handler to an already-
+        closed stream and asserts no traceback leaks.
+        """
+        import io
+
+        closed_stream = io.StringIO()
+        closed_stream.close()
+        handler = logging.StreamHandler(closed_stream)
+        handler.setLevel(logging.DEBUG)
+
+        facade_logger = logging.getLogger("observability.facade")
+        prev_level = facade_logger.level
+        facade_logger.addHandler(handler)
+        facade_logger.setLevel(logging.DEBUG)
+
+        try:
+            facade = ObservabilityFacade()
+            facade._initialized = True
+            facade._sentry_backend = mock.MagicMock()
+            facade._otel_backend = mock.MagicMock()
+
+            assert logging.raiseExceptions is True
+            facade._atexit_shutdown()
+            assert logging.raiseExceptions is True
+
+            captured = capsys.readouterr()
+            assert "Logging error" not in captured.err
+            assert "I/O operation on closed file" not in captured.err
+        finally:
+            facade_logger.removeHandler(handler)
+            facade_logger.setLevel(prev_level)
+
 
 class TestFacadeWithoutInit:
     """Tests for facade methods when not initialized."""
