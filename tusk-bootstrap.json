@@ -1,19 +1,19 @@
 {
   "version": 1,
   "project_type": "python_service",
-  "tasks": [
+  "manifest_files": [
     {
-      "summary": "Install gioe-libs into project dependencies",
-      "description": "Add gioe-libs to the project's requirements.txt (or pyproject.toml). Use the GitHub install form to pin to a specific ref:\n\n```\ngioe-libs @ git+https://github.com/gioe/python-libs.git@main\n```\n\nInstall into the local virtualenv and verify the import resolves:\n\n```bash\npip install -r requirements.txt\npython -c 'import gioe_libs; print(gioe_libs.__file__)'\n```\n\nIf your service needs the optional observability extras (OpenTelemetry + Sentry), add:\n\n```\ngioe-libs[observability] @ git+https://github.com/gioe/python-libs.git@main\n```",
-      "priority": "High",
-      "task_type": "chore",
-      "complexity": "XS",
-      "criteria": [
-        "gioe-libs appears in requirements.txt or pyproject.toml with a pinned GitHub ref",
-        "pip install succeeds with no dependency conflicts",
-        "import gioe_libs resolves without error in the project virtualenv"
-      ]
+      "path": "pyproject.toml",
+      "content": "[project]\nname = \"service\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\ndependencies = [\n    \"gioe-libs @ git+https://github.com/gioe/python-libs.git@main\"\n]\n",
+      "mode": "create_only"
     },
+    {
+      "path": "requirements.txt",
+      "content": "gioe-libs @ git+https://github.com/gioe/python-libs.git@main\n",
+      "mode": "create_only"
+    }
+  ],
+  "tasks": [
     {
       "summary": "Configure structured logging with gioe_libs.aiq_logging",
       "description": "Replace ad-hoc logging setup with the structured logger from gioe_libs. Create a logging_config.py module in your service that wraps gioe_libs.aiq_logging.\n\nMinimal setup:\n\n```python\nfrom gioe_libs.aiq_logging import setup_logging, get_logger\n\n# Call once at service startup (e.g. in main.py or app factory)\nsetup_logging(service_name=\"my-service\", log_level=\"INFO\", json_output=True)\n\nlogger = get_logger(__name__)\n```\n\nFor FastAPI services, add the request-id middleware so each request gets a correlation ID in every log line:\n\n```python\nfrom gioe_libs.aiq_logging import request_id_context\n```\n\nJSON output should be enabled in production (log_level from env var LOG_LEVEL, defaulting to INFO).",
