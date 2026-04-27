@@ -92,11 +92,13 @@ echo ""
 echo "Running $SERVICE_NAME..."
 echo "----------------------------------------------------------------"
 
+# Run python and capture the exit code via `|| EXIT_CODE=$?` so a
+# non-zero exit is consumed by `||` rather than tripping set -e — this
+# keeps the completion banner below reachable on failure paths.
+# `:-0` fills the success-path default where `||` never fires.
 # shellcheck disable=SC2086
-python "$SCRIPT_PATH" $PYTHON_ARGS
-
-# Capture exit code
-EXIT_CODE=$?
+python "$SCRIPT_PATH" $PYTHON_ARGS || EXIT_CODE=$?
+EXIT_CODE=${EXIT_CODE:-0}
 
 echo "----------------------------------------------------------------"
 echo "$SERVICE_NAME completed with exit code: $EXIT_CODE"
